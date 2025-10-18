@@ -29,6 +29,8 @@ urlpatterns = [
 urlpatterns += [
     # API base url
     path("api/", include("config.api_router")),
+    # Authentication API
+    path("api/auth/", include("hirethon_template.authentication.urls", namespace="auth_api")),
     # DRF auth token
     path("auth-token/", obtain_auth_token),
     path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),

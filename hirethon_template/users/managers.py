@@ -1,6 +1,8 @@
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import UserManager as DjangoUserManager
 
+from hirethon_template.users.enums import UserRole
+
 
 class UserManager(DjangoUserManager):
     """Custom manager for the User model."""
@@ -20,11 +22,13 @@ class UserManager(DjangoUserManager):
     def create_user(self, email: str, password: str | None = None, **extra_fields):
         extra_fields.setdefault("is_staff", False)
         extra_fields.setdefault("is_superuser", False)
+        extra_fields.setdefault("role", UserRole.MEMBER)
         return self._create_user(email, password, **extra_fields)
 
     def create_superuser(self, email: str, password: str | None = None, **extra_fields):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("role", UserRole.ADMIN)
 
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True.")
