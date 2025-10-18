@@ -171,3 +171,40 @@ class TeamMembers(models.Model):
     
     def __str__(self):
         return f"{self.member.name} in {self.team.team_name}"
+
+
+class MemberTimezones(models.Model):
+    """MemberTimezones model for storing member timezone preferences."""
+    
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='timezone_preference',
+        help_text=_("User whose timezone preference this is")
+    )
+    
+    timezone = models.CharField(
+        _("Timezone"),
+        max_length=100,
+        help_text=_("User's preferred timezone (e.g., 'America/New_York', 'Europe/London')")
+    )
+    
+    created_at = models.DateTimeField(
+        _("Created At"),
+        auto_now_add=True,
+        help_text=_("When the timezone preference was set")
+    )
+    
+    updated_at = models.DateTimeField(
+        _("Updated At"),
+        auto_now=True,
+        help_text=_("When the timezone preference was last updated")
+    )
+    
+    class Meta:
+        verbose_name = _("Member Timezone")
+        verbose_name_plural = _("Member Timezones")
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.user.name} - {self.timezone}"

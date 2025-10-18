@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { logout } from '../store/authSlice';
 import authService from '../services/authService';
 import adminService from '../services/adminService';
@@ -18,7 +19,6 @@ const AdminDashboard = () => {
   const [newManagerEmail, setNewManagerEmail] = useState('');
   const [newManagerPassword, setNewManagerPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
   // Load data on component mount
   useEffect(() => {
@@ -32,7 +32,7 @@ const AdminDashboard = () => {
       setOrganizations(response.data);
     } catch (error) {
       console.error('Error loading organizations:', error);
-      setError('Failed to load organizations');
+      toast.error('Failed to load organizations');
     }
   };
 
@@ -42,7 +42,7 @@ const AdminDashboard = () => {
       setManagers(response.data);
     } catch (error) {
       console.error('Error loading managers:', error);
-      setError('Failed to load managers');
+      toast.error('Failed to load managers');
     }
   };
 
@@ -62,7 +62,6 @@ const AdminDashboard = () => {
     e.preventDefault();
     if (newOrgName.trim() && selectedManager) {
       setLoading(true);
-      setError('');
       try {
         const response = await adminService.organizations.create({
           org_name: newOrgName.trim(),
@@ -71,9 +70,10 @@ const AdminDashboard = () => {
         setOrganizations([...organizations, response.data]);
         setNewOrgName('');
         setSelectedManager('');
+        toast.success('Organization created successfully!');
       } catch (error) {
         console.error('Error creating organization:', error);
-        setError('Failed to create organization: ' + (error.response?.data?.detail || error.message));
+        toast.error('Failed to create organization: ' + (error.response?.data?.detail || error.message));
       } finally {
         setLoading(false);
       }
@@ -84,7 +84,6 @@ const AdminDashboard = () => {
     e.preventDefault();
     if (newManagerName.trim() && newManagerEmail.trim() && newManagerPassword.trim()) {
       setLoading(true);
-      setError('');
       try {
         const response = await adminService.managers.register({
           name: newManagerName.trim(),
@@ -95,9 +94,10 @@ const AdminDashboard = () => {
         setNewManagerName('');
         setNewManagerEmail('');
         setNewManagerPassword('');
+        toast.success('Manager created successfully!');
       } catch (error) {
         console.error('Error creating manager:', error);
-        setError('Failed to create manager: ' + (error.response?.data?.detail || error.message));
+        toast.error('Failed to create manager: ' + (error.response?.data?.detail || error.message));
       } finally {
         setLoading(false);
       }
@@ -174,12 +174,6 @@ const AdminDashboard = () => {
               </button>
             </div>
 
-            {/* Error Display */}
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-                {error}
-              </div>
-            )}
 
             {/* Tab Content */}
             {activeTab === 'organizations' && (

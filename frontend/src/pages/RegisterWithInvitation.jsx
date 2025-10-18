@@ -1,25 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useDispatch } from 'react-redux';
-import { setUser, setRole } from '../store/authSlice';
-import { fetchUserRoles } from '../store/authSlice';
+import toast from 'react-hot-toast';
 import authService from '../services/authService';
 
 const RegisterWithInvitation = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const dispatch = useDispatch();
   
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    timezone: ''
   });
   
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const [invitationInfo, setInvitationInfo] = useState(null);
+  
+  // Major timezones for the dropdown
+  const timezoneOptions = [
+    { value: 'America/New_York', label: 'Eastern Time (ET) - New York' },
+    { value: 'America/Chicago', label: 'Central Time (CT) - Chicago' },
+    { value: 'America/Denver', label: 'Mountain Time (MT) - Denver' },
+    { value: 'America/Los_Angeles', label: 'Pacific Time (PT) - Los Angeles' },
+    { value: 'Europe/London', label: 'Greenwich Mean Time (GMT) - London' },
+    { value: 'Europe/Paris', label: 'Central European Time (CET) - Paris' },
+    { value: 'Europe/Berlin', label: 'Central European Time (CET) - Berlin' },
+    { value: 'Asia/Tokyo', label: 'Japan Standard Time (JST) - Tokyo' },
+    { value: 'Asia/Shanghai', label: 'China Standard Time (CST) - Shanghai' },
+    { value: 'Asia/Kolkata', label: 'India Standard Time (IST) - Mumbai' },
+    { value: 'Australia/Sydney', label: 'Australian Eastern Time (AET) - Sydney' },
+    { value: 'America/Sao_Paulo', label: 'Brasilia Time (BRT) - São Paulo' },
+    { value: 'UTC', label: 'Coordinated Universal Time (UTC)' }
+  ];
   
   const token = searchParams.get('token');
   const email = searchParams.get('email');
@@ -27,7 +41,7 @@ const RegisterWithInvitation = () => {
 
   useEffect(() => {
     if (!token || !email || !teamId) {
-      setError('Invalid invitation link. Please check your email for the correct link.');
+      toast.error('Invalid invitation link. Please check your email for the correct link.');
       return;
     }
     
@@ -56,17 +70,21 @@ const RegisterWithInvitation = () => {
     e.preventDefault();
     
     if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
+      toast.error('Passwords do not match');
       return;
     }
     
     if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters long');
+      toast.error('Password must be at least 8 characters long');
+      return;
+    }
+    
+    if (!formData.timezone) {
+      toast.error('Please select your timezone');
       return;
     }
     
     setLoading(true);
-    setError('');
     
     try {
       console.log('Starting registration with data:', {
@@ -81,7 +99,8 @@ const RegisterWithInvitation = () => {
         email: formData.email,
         password: formData.password,
         token: token,
-        team_id: teamId
+        team_id: teamId,
+        timezone: formData.timezone
       });
       
       console.log('Registration successful, full response:', response);
@@ -89,7 +108,7 @@ const RegisterWithInvitation = () => {
       
       // Registration successful - redirect to login page
       console.log('Registration successful! Redirecting to login page...');
-      alert('Registration successful! Please log in with your credentials.');
+      toast.success('Registration successful! Please log in with your credentials.');
       navigate('/login');
       
     } catch (error) {
@@ -99,7 +118,7 @@ const RegisterWithInvitation = () => {
         responseData: error.response?.data,
         status: error.response?.status
       });
-      setError(error.response?.data?.error || error.response?.data?.detail || 'Registration failed. Please try again.');
+      toast.error(error.response?.data?.error || error.response?.data?.detail || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -114,7 +133,7 @@ const RegisterWithInvitation = () => {
               Invalid Invitation
             </h2>
             <p className="mt-2 text-sm text-gray-600">
-              {error}
+              Please check your email for the correct invitation link.
             </p>
           </div>
         </div>
@@ -145,11 +164,6 @@ const RegisterWithInvitation = () => {
             )}
           </div>
 
-          {error && (
-            <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-              {error}
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
@@ -220,6 +234,28 @@ const RegisterWithInvitation = () => {
                 disabled={loading}
                 minLength={8}
               />
+            </div>
+
+            <div>
+              <label htmlFor="timezone" className="block text-sm font-medium text-gray-700 mb-2">
+                Timezone
+              </label>
+              <select
+                id="timezone"
+                name="timezone"
+                required
+                value={formData.timezone}
+                onChange={handleChange}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                disabled={loading}
+              >
+                <option value="">Select your timezone</option>
+                {timezoneOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <button

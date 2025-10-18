@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { logout } from '../store/authSlice';
 import authService from '../services/authService';
 import managerService from '../services/managerService';
@@ -17,7 +18,6 @@ const ManagerDashboard = () => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [selectedTeam, setSelectedTeam] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
   // Load data on component mount
   useEffect(() => {
@@ -35,7 +35,7 @@ const ManagerDashboard = () => {
       setTeams(response.data);
     } catch (error) {
       console.error('Error loading teams:', error);
-      setError('Failed to load teams');
+      toast.error('Failed to load teams');
     }
   };
 
@@ -45,7 +45,7 @@ const ManagerDashboard = () => {
       setInvitations(response.data);
     } catch (error) {
       console.error('Error loading invitations:', error);
-      setError('Failed to load invitations');
+      toast.error('Failed to load invitations');
     }
   };
 
@@ -65,7 +65,7 @@ const ManagerDashboard = () => {
       setTeamMembers(members);
     } catch (error) {
       console.error('Error loading team members:', error);
-      setError('Failed to load team members');
+      toast.error('Failed to load team members');
     }
   };
 
@@ -73,16 +73,16 @@ const ManagerDashboard = () => {
     e.preventDefault();
     if (newTeamName.trim()) {
       setLoading(true);
-      setError('');
       try {
         const response = await managerService.teams.create({
           team_name: newTeamName.trim()
         });
         setTeams([...teams, response.data]);
         setNewTeamName('');
+        toast.success('Team created successfully!');
       } catch (error) {
         console.error('Error creating team:', error);
-        setError('Failed to create team: ' + (error.response?.data?.detail || error.message));
+        toast.error('Failed to create team: ' + (error.response?.data?.detail || error.message));
       } finally {
         setLoading(false);
       }
@@ -93,7 +93,6 @@ const ManagerDashboard = () => {
     e.preventDefault();
     if (inviteEmail.trim() && selectedTeam) {
       setLoading(true);
-      setError('');
       try {
         await managerService.invitations.send({
           email: inviteEmail.trim(),
@@ -101,13 +100,12 @@ const ManagerDashboard = () => {
         });
         setInviteEmail('');
         setSelectedTeam('');
-        setError(''); // Clear any previous errors
-        alert('Invitation sent successfully!');
+        toast.success('Invitation sent successfully!');
         // Refresh invitations list
         loadInvitations();
       } catch (error) {
         console.error('Error sending invitation:', error);
-        setError('Failed to send invitation: ' + (error.response?.data?.detail || error.message));
+        toast.error('Failed to send invitation: ' + (error.response?.data?.detail || error.message));
       } finally {
         setLoading(false);
       }
@@ -196,12 +194,6 @@ const ManagerDashboard = () => {
               </button>
             </div>
 
-            {/* Error Display */}
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-                {error}
-              </div>
-            )}
 
             {/* Tab Content */}
             {activeTab === 'teams' && (

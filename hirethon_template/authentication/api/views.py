@@ -244,17 +244,18 @@ def register_with_invitation(request):
     """
     Register a new member user using an invitation token.
     """
-    from hirethon_template.manager_dashboard.models import Invitation, TeamMembers
+    from hirethon_template.manager_dashboard.models import Invitation, TeamMembers, MemberTimezones
     
     token = request.data.get('token')
     email = request.data.get('email')
     name = request.data.get('name')
     password = request.data.get('password')
     team_id = request.data.get('team_id')
+    timezone = request.data.get('timezone')
     
-    if not all([token, email, name, password, team_id]):
+    if not all([token, email, name, password, team_id, timezone]):
         return Response(
-            {"error": "Token, email, name, password, and team_id are required."}, 
+            {"error": "Token, email, name, password, team_id, and timezone are required."}, 
             status=status.HTTP_400_BAD_REQUEST
         )
     
@@ -297,10 +298,16 @@ def register_with_invitation(request):
             member=user
         )
         
+        # Save user's timezone preference
+        MemberTimezones.objects.create(
+            user=user,
+            timezone=timezone
+        )
+        
         # Mark invitation as accepted
-        from django.utils import timezone
+        from django.utils import timezone as django_timezone
         invitation.status = 'accepted'
-        invitation.accepted_at = timezone.now()
+        invitation.accepted_at = django_timezone.now()
         invitation.save()
         
         # Generate JWT tokens

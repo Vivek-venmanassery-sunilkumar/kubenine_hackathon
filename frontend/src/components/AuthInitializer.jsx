@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchUserRoles, setUser, setRole, setLoading } from '../store/authSlice';
+import { fetchUserRoles } from '../store/authSlice';
 
 const AuthInitializer = ({ children }) => {
   const dispatch = useDispatch();

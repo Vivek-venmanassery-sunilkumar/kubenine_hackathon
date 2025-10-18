@@ -1,12 +1,10 @@
 import { useNavigate } from 'react-router-dom';
-import { useSelector, useDispatch } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { useEffect } from 'react';
-import { fetchUserRoles } from '../store/authSlice';
 import '../App.css'
 
 function LandingPage() {
   const navigate = useNavigate();
-  const dispatch = useDispatch();
   const { isAuthenticated, role, loading } = useSelector((state) => state.auth);
 
   // Check authentication status on component mount

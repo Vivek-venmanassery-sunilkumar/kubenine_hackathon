@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
+import toast from 'react-hot-toast';
 import { setUser, setRole } from '../store/authSlice';
 import { fetchUserRoles } from '../store/authSlice';
 import authService from '../services/authService';
@@ -10,7 +11,6 @@ const LoginPage = () => {
     email: '',
     password: ''
   });
-  const [error, setError] = useState('');
   
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -25,7 +25,6 @@ const LoginPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
 
     try {
       const data = await authService.login(formData.email, formData.password);
@@ -40,6 +39,8 @@ const LoginPage = () => {
       // Tokens are automatically stored in HTTP-only cookies
       // No need to handle them in JavaScript
       
+      toast.success('Login successful!');
+      
       // Redirect based on role
       if (data.user.role === 'admin') {
         navigate('/admin-dashboard');
@@ -49,7 +50,7 @@ const LoginPage = () => {
         navigate('/member-dashboard');
       }
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -121,11 +122,6 @@ const LoginPage = () => {
                 </div>
               </div>
 
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">
-                  {error}
-                </div>
-              )}
 
               <div>
                 <button
