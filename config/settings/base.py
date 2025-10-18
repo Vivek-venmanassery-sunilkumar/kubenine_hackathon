@@ -321,8 +321,9 @@ SOCIALACCOUNT_FORMS = {"signup": "hirethon_template.users.forms.UserSocialSignup
 # django-rest-framework - https://www.django-rest-framework.org/api-guide/settings/
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework.authentication.SessionAuthentication",
+        "hirethon_template.authentication.authentication.CookieJWTAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
@@ -348,6 +349,8 @@ REST_AUTH = {
     "SESSION_LOGIN": False,
 }
 
+# JWT Settings will be defined in local.py after SECRET_KEY is available
+
 # Customize admin site
 ADMIN_SITE_HEADER = "{} Admin".format("hirethon_template".title())
 ADMIN_SITE_TITLE = "{} Admin Portal".format("hirethon_template".title())
@@ -362,6 +365,10 @@ CLOUDFRONT_DOMAIN = env("CLOUDFRONT_DOMAIN", default="")
 
 # Update CORS settings
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
     "https://staging.app.hirethon_template.in",
     "https://app.hirethon_template.in",
     "https://*.hirethon_template.in",

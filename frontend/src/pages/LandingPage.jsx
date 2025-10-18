@@ -1,6 +1,27 @@
+import { useNavigate } from 'react-router-dom';
+import { useSelector, useDispatch } from 'react-redux';
+import { useEffect } from 'react';
+import { fetchUserRoles } from '../store/authSlice';
 import '../App.css'
 
 function LandingPage() {
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const { isAuthenticated, role, loading } = useSelector((state) => state.auth);
+
+  // Check authentication status on component mount
+  useEffect(() => {
+    if (isAuthenticated && !loading) {
+      // If user is authenticated, redirect to appropriate dashboard
+      if (role === 'admin') {
+        navigate('/admin-dashboard');
+      } else if (role === 'manager') {
+        navigate('/manager-dashboard');
+      } else if (role === 'member') {
+        navigate('/member-dashboard');
+      }
+    }
+  }, [isAuthenticated, role, loading, navigate]);
   return (
     <div className="min-h-screen w-screen overflow-x-hidden">
       {/* Hero Section */}
@@ -19,12 +40,34 @@ function LandingPage() {
               Never miss a critical incident with our intelligent rotation system.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-8">
-              <button className="btn-primary w-full sm:w-auto">
-                Get Started
-              </button>
-              <button className="btn-secondary w-full sm:w-auto">
-                Learn More
-              </button>
+              {isAuthenticated ? (
+                <button 
+                  onClick={() => {
+                    if (role === 'admin') {
+                      navigate('/admin-dashboard');
+                    } else if (role === 'manager') {
+                      navigate('/manager-dashboard');
+                    } else {
+                      navigate('/member-dashboard');
+                    }
+                  }}
+                  className="btn-primary w-full sm:w-auto"
+                >
+                  Go to Dashboard
+                </button>
+              ) : (
+                <>
+                  <button 
+                    onClick={() => navigate('/login')}
+                    className="btn-primary w-full sm:w-auto"
+                  >
+                    Login
+                  </button>
+                  <button className="btn-secondary w-full sm:w-auto">
+                    Learn More
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

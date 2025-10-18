@@ -1,46 +1,45 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1/';
+import axios from 'axios';
 
-class ApiService {
-  constructor() {
-    this.baseURL = API_BASE_URL;
+// Create axios instance with base configuration
+const api = axios.create({
+  baseURL: 'http://localhost:8000/api',
+  timeout: 10000,
+  withCredentials: true, // Important for HTTP-only cookies
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Request interceptor to add auth headers if needed
+api.interceptors.request.use(
+  (config) => {
+    // You can add auth headers here if needed
+    // For now, we rely on HTTP-only cookies
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
   }
+);
 
-  async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
-    const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-      ...options,
-    };
-
-    try {
-      const response = await fetch(url, config);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error('API request failed:', error);
-      throw error;
+// Response interceptor to handle common errors
+api.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  (error) => {
+    if (error.response?.status === 401) {
+      // Handle unauthorized access
+      console.error('Unauthorized access');
+    } else if (error.response?.status === 403) {
+      // Handle forbidden access
+      console.error('Forbidden access');
+    } else if (error.response?.status >= 500) {
+      // Handle server errors
+      console.error('Server error');
     }
+    return Promise.reject(error);
   }
+);
 
-  // User endpoints
-  async getUsers() {
-    return this.request('users/');
-  }
-
-  async getUser(id) {
-    return this.request(`users/${id}/`);
-  }
-
-  async getCurrentUser() {
-    return this.request('users/me/');
-  }
-}
-
-export default new ApiService();
+export default api;
