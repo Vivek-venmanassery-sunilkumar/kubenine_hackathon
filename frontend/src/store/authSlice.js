@@ -11,6 +11,7 @@ const initialState = {
     is_member: false,
   },
   loading: false,
+  rolesLoaded: false, // Track if we've attempted to load roles
   error: null,
 };
 
@@ -61,6 +62,7 @@ const authSlice = createSlice({
         is_member: false,
       };
       state.loading = false;
+      state.rolesLoaded = false;
       state.error = null;
     },
     clearError: (state) => {
@@ -75,23 +77,24 @@ const authSlice = createSlice({
       })
       .addCase(fetchUserRoles.fulfilled, (state, action) => {
         state.loading = false;
+        state.rolesLoaded = true;
+        state.isAuthenticated = true; // User is authenticated if we can fetch roles
         state.roles = {
           is_admin: action.payload.is_admin,
           is_manager: action.payload.is_manager,
           is_member: action.payload.is_member,
         };
-        // Update user info if available
-        if (action.payload.name || action.payload.email) {
-          state.user = {
-            ...state.user,
-            name: action.payload.name,
-            email: action.payload.email,
-            id: action.payload.id,
-          };
-        }
+        // Update user info
+        state.user = {
+          name: action.payload.name,
+          email: action.payload.email,
+          id: action.payload.id,
+        };
+        state.role = action.payload.role;
       })
       .addCase(fetchUserRoles.rejected, (state, action) => {
         state.loading = false;
+        state.rolesLoaded = true; // Mark as loaded even if failed
         state.error = action.payload;
       });
   },

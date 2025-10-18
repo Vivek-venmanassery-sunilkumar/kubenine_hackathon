@@ -65,7 +65,7 @@ def register_manager(request):
 
 
 @api_view(['POST'])
-@permission_classes([])  # No authentication required for login
+@permission_classes([AllowAny])  # No authentication required for login
 def login(request):
     """
     Login endpoint that returns JWT tokens and user role information.
@@ -135,7 +135,7 @@ def login(request):
 
 
 @api_view(['POST'])
-@permission_classes([])  # No authentication required for refresh
+@permission_classes([AllowAny])  # No authentication required for refresh
 def refresh_token(request):
     """
     Refresh access token using refresh token.
@@ -178,7 +178,7 @@ def refresh_token(request):
 
 
 @api_view(['POST'])
-@permission_classes([])  # No authentication required for logout
+@permission_classes([AllowAny])  # No authentication required for logout
 def logout(request):
     """
     Logout endpoint that clears cookies.

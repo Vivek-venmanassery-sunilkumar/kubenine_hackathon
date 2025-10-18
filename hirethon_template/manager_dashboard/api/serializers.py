@@ -6,14 +6,27 @@ from hirethon_template.authentication.models import Organization
 User = get_user_model()
 
 
+class TeamMembersSerializer(serializers.ModelSerializer):
+    """Serializer for TeamMembers model."""
+    
+    member_name = serializers.CharField(source='member.name', read_only=True)
+    member_email = serializers.CharField(source='member.email', read_only=True)
+    
+    class Meta:
+        model = TeamMembers
+        fields = ['id', 'member', 'member_name', 'member_email', 'joined_at', 'is_active']
+        read_only_fields = ['joined_at']
+
+
 class TeamSerializer(serializers.ModelSerializer):
     """Serializer for Team model."""
     
     organization_name = serializers.CharField(source='organization.org_name', read_only=True)
+    members = TeamMembersSerializer(source='members.all', many=True, read_only=True)
     
     class Meta:
         model = Team
-        fields = ['id', 'team_name', 'organization_name', 'created_at', 'updated_at', 'is_active']
+        fields = ['id', 'team_name', 'organization_name', 'members', 'created_at', 'updated_at', 'is_active']
         read_only_fields = ['organization']  # Organization is auto-assigned, not user input
 
 
@@ -21,10 +34,11 @@ class TeamListSerializer(serializers.ModelSerializer):
     """Serializer for listing teams."""
     
     organization_name = serializers.CharField(source='organization.org_name', read_only=True)
+    members = TeamMembersSerializer(source='members.all', many=True, read_only=True)
     
     class Meta:
         model = Team
-        fields = ['id', 'team_name', 'organization_name', 'created_at', 'is_active']
+        fields = ['id', 'team_name', 'organization_name', 'members', 'created_at', 'is_active']
 
 
 class ManagerDashboardSerializer(serializers.Serializer):
@@ -52,7 +66,7 @@ class InvitationSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source='organization.org_name', read_only=True)
     invited_by_name = serializers.CharField(source='invited_by.name', read_only=True)
     invitation_url = serializers.CharField(source='get_invitation_url', read_only=True)
-    is_expired = serializers.BooleanField(source='is_expired', read_only=True)
+    is_expired = serializers.BooleanField(read_only=True)
     
     class Meta:
         model = Invitation
@@ -109,24 +123,13 @@ class InvitationListSerializer(serializers.ModelSerializer):
     
     team_name = serializers.CharField(source='team.team_name', read_only=True)
     organization_name = serializers.CharField(source='organization.org_name', read_only=True)
-    is_expired = serializers.BooleanField(source='is_expired', read_only=True)
+    is_expired = serializers.BooleanField(read_only=True)
     
     class Meta:
         model = Invitation
         fields = [
-            'id', 'email', 'team_name', 'organization_name', 'status', 
+            'id', 'email', 'team', 'team_name', 'organization_name', 'status', 
             'created_at', 'expires_at', 'accepted_at', 'is_expired'
         ]
 
 
-class TeamMembersSerializer(serializers.ModelSerializer):
-    """Serializer for TeamMembers model."""
-    
-    member_name = serializers.CharField(source='member.name', read_only=True)
-    member_email = serializers.CharField(source='member.email', read_only=True)
-    team_name = serializers.CharField(source='team.team_name', read_only=True)
-    
-    class Meta:
-        model = TeamMembers
-        fields = ['id', 'team', 'team_name', 'member', 'member_name', 'member_email', 'joined_at', 'is_active']
-        read_only_fields = ['joined_at']

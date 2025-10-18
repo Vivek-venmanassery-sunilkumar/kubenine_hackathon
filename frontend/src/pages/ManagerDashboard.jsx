@@ -11,6 +11,8 @@ const ManagerDashboard = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('teams');
   const [teams, setTeams] = useState([]);
+  const [invitations, setInvitations] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [newTeamName, setNewTeamName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [selectedTeam, setSelectedTeam] = useState('');
@@ -19,7 +21,12 @@ const ManagerDashboard = () => {
 
   // Load data on component mount
   useEffect(() => {
-    loadTeams();
+    const loadAllData = async () => {
+      await loadTeams();
+      await loadInvitations();
+      await loadTeamMembers();
+    };
+    loadAllData();
   }, []);
 
   const loadTeams = async () => {
@@ -29,6 +36,36 @@ const ManagerDashboard = () => {
     } catch (error) {
       console.error('Error loading teams:', error);
       setError('Failed to load teams');
+    }
+  };
+
+  const loadInvitations = async () => {
+    try {
+      const response = await managerService.invitations.getAll();
+      setInvitations(response.data);
+    } catch (error) {
+      console.error('Error loading invitations:', error);
+      setError('Failed to load invitations');
+    }
+  };
+
+  const loadTeamMembers = async () => {
+    try {
+      // Get team members through the teams endpoint
+      const response = await managerService.teams.getAll();
+      // Extract team members from teams data if available
+      const members = [];
+      response.data.forEach(team => {
+        if (team.members && Array.isArray(team.members)) {
+          team.members.forEach(member => {
+            members.push({ ...member, team_id: team.id, team_name: team.team_name });
+          });
+        }
+      });
+      setTeamMembers(members);
+    } catch (error) {
+      console.error('Error loading team members:', error);
+      setError('Failed to load team members');
     }
   };
 
@@ -66,6 +103,8 @@ const ManagerDashboard = () => {
         setSelectedTeam('');
         setError(''); // Clear any previous errors
         alert('Invitation sent successfully!');
+        // Refresh invitations list
+        loadInvitations();
       } catch (error) {
         console.error('Error sending invitation:', error);
         setError('Failed to send invitation: ' + (error.response?.data?.detail || error.message));
@@ -198,20 +237,104 @@ const ManagerDashboard = () => {
                   {teams.length === 0 ? (
                     <p className="text-gray-500 text-center py-8">No teams created yet</p>
                   ) : (
-                    <div className="space-y-3">
-                      {teams.map((team) => (
-                        <div key={team.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                          <div>
-                            <h4 className="font-semibold text-gray-900">{team.team_name}</h4>
-                            <p className="text-sm text-blue-600 font-medium">Organization: {team.organization_name}</p>
-                            <p className="text-sm text-gray-500">Created: {new Date(team.created_at).toLocaleDateString()}</p>
+                    <div className="space-y-6">
+                      {teams.map((team) => {
+                        // Filter invitations by team ID (now available in the response)
+                        const teamInvitations = invitations.filter(inv => parseInt(inv.team) === parseInt(team.id));
+                        const teamMembersList = teamMembers.filter(member => parseInt(member.team_id) === parseInt(team.id));
+                        const pendingInvitations = teamInvitations.filter(inv => inv.status === 'pending');
+                        const acceptedInvitations = teamInvitations.filter(inv => inv.status === 'accepted');
+                        
+                        return (
+                          <div key={team.id} className="border border-gray-200 rounded-lg p-6 bg-gray-50">
+                            {/* Team Header */}
+                            <div className="flex items-center justify-between mb-4">
+                              <div>
+                                <h4 className="text-lg font-semibold text-gray-900">{team.team_name}</h4>
+                                <p className="text-sm text-blue-600 font-medium">Organization: {team.organization_name}</p>
+                                <p className="text-sm text-gray-500">Created: {new Date(team.created_at).toLocaleDateString()}</p>
+                              </div>
+                              <div className="flex space-x-2">
+                                <button className="text-blue-600 hover:text-blue-800 font-medium text-sm">Edit</button>
+                                <button className="text-red-600 hover:text-red-800 font-medium text-sm">Delete</button>
+                              </div>
+                            </div>
+
+                            {/* Team Members */}
+                            <div className="mb-4">
+                              <h5 className="text-md font-medium text-gray-800 mb-2">
+                                Team Members ({teamMembersList.length})
+                              </h5>
+                              {teamMembersList.length === 0 ? (
+                                <p className="text-sm text-gray-500 italic">No members yet</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {teamMembersList.map((member) => (
+                                    <div key={member.id} className="flex items-center justify-between bg-white p-3 rounded border">
+                                      <div>
+                                        <span className="font-medium text-gray-900">{member.member_name || member.name}</span>
+                                        <span className="text-sm text-gray-600 ml-2">({member.member_email || member.email})</span>
+                                      </div>
+                                      <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded">
+                                        Joined {new Date(member.joined_at).toLocaleDateString()}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Pending Invitations */}
+                            <div>
+                              <h5 className="text-md font-medium text-gray-800 mb-2">
+                                Pending Invitations ({pendingInvitations.length})
+                              </h5>
+                              {pendingInvitations.length === 0 ? (
+                                <p className="text-sm text-gray-500 italic">No pending invitations</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {pendingInvitations.map((invitation) => (
+                                    <div key={invitation.id} className="flex items-center justify-between bg-yellow-50 p-3 rounded border border-yellow-200">
+                                      <div>
+                                        <span className="font-medium text-gray-900">{invitation.email}</span>
+                                        <span className="text-sm text-gray-600 ml-2">
+                                          Invited {new Date(invitation.created_at).toLocaleDateString()}
+                                        </span>
+                                      </div>
+                                      <div className="flex space-x-2">
+                                        <span className="text-xs text-yellow-600 bg-yellow-100 px-2 py-1 rounded">
+                                          Pending
+                                        </span>
+                                        <button 
+                                          className="text-xs text-blue-600 hover:text-blue-800"
+                                          onClick={() => {
+                                            if (window.confirm('Resend invitation to ' + invitation.email + '?')) {
+                                              managerService.invitations.resend(invitation.id);
+                                            }
+                                          }}
+                                        >
+                                          Resend
+                                        </button>
+                                        <button 
+                                          className="text-xs text-red-600 hover:text-red-800"
+                                          onClick={() => {
+                                            if (window.confirm('Cancel invitation to ' + invitation.email + '?')) {
+                                              managerService.invitations.cancel(invitation.id);
+                                              loadInvitations();
+                                            }
+                                          }}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex space-x-2">
-                            <button className="text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                            <button className="text-red-600 hover:text-red-800 font-medium">Delete</button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

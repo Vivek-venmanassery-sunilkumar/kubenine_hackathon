@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { Provider } from 'react-redux'
 import { store } from './store'
+import AuthInitializer from './components/AuthInitializer'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
 import RegisterWithInvitation from './pages/RegisterWithInvitation'
@@ -14,9 +15,10 @@ import './App.css'
 function App() {
   return (
     <Provider store={store}>
-      <div className="App">
-        <Router>
-          <Routes>
+      <AuthInitializer>
+        <div className="App">
+          <Router>
+            <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterWithInvitation />} />
@@ -47,9 +49,10 @@ function App() {
                 </MemberProtectedRoute>
               } 
             />
-          </Routes>
-        </Router>
-      </div>
+            </Routes>
+          </Router>
+        </div>
+      </AuthInitializer>
     </Provider>
   )
 }

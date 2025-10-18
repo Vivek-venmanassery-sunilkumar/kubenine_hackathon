@@ -3,10 +3,10 @@ import { useSelector } from 'react-redux';
 import { Navigate } from 'react-router-dom';
 
 const AdminProtectedRoute = ({ children, fallbackPath = '/login' }) => {
-  const { isAuthenticated, loading, roles, role } = useSelector((state) => state.auth);
+  const { isAuthenticated, loading, roles, role, rolesLoaded } = useSelector((state) => state.auth);
 
-  // Show loading spinner while checking authentication
-  if (loading) {
+  // Show loading spinner while checking authentication or loading roles
+  if (loading || !rolesLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -22,8 +22,8 @@ const AdminProtectedRoute = ({ children, fallbackPath = '/login' }) => {
     return <Navigate to={fallbackPath} replace />;
   }
 
-  // Check if user is admin
-  if (role !== 'admin' || !roles.is_admin) {
+  // Check if user is admin (only after roles are loaded)
+  if (rolesLoaded && (role !== 'admin' || !roles.is_admin)) {
     return <Navigate to="/unauthorized" replace />;
   }
 
