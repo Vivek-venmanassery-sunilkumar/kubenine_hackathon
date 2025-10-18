@@ -1,13 +1,79 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { logout } from '../store/authSlice';
 import authService from '../services/authService';
+import managerService from '../services/managerService';
 
 const ManagerDashboard = () => {
-  const { user, role, roles } = useSelector((state) => state.auth);
+  const { user, role } = useSelector((state) => state.auth);
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('teams');
+  const [teams, setTeams] = useState([]);
+  const [newTeamName, setNewTeamName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [selectedTeam, setSelectedTeam] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Load data on component mount
+  useEffect(() => {
+    loadTeams();
+  }, []);
+
+  const loadTeams = async () => {
+    try {
+      const response = await managerService.teams.getAll();
+      setTeams(response.data);
+    } catch (error) {
+      console.error('Error loading teams:', error);
+      setError('Failed to load teams');
+    }
+  };
+
+  const handleCreateTeam = async (e) => {
+    e.preventDefault();
+    if (newTeamName.trim()) {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await managerService.teams.create({
+          team_name: newTeamName.trim()
+        });
+        setTeams([...teams, response.data]);
+        setNewTeamName('');
+      } catch (error) {
+        console.error('Error creating team:', error);
+        setError('Failed to create team: ' + (error.response?.data?.detail || error.message));
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleInviteMember = async (e) => {
+    e.preventDefault();
+    if (inviteEmail.trim() && selectedTeam) {
+      setLoading(true);
+      setError('');
+      try {
+        await managerService.invitations.send({
+          email: inviteEmail.trim(),
+          team: parseInt(selectedTeam)
+        });
+        setInviteEmail('');
+        setSelectedTeam('');
+        setError(''); // Clear any previous errors
+        alert('Invitation sent successfully!');
+      } catch (error) {
+        console.error('Error sending invitation:', error);
+        setError('Failed to send invitation: ' + (error.response?.data?.detail || error.message));
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -30,18 +96,6 @@ const ManagerDashboard = () => {
             <div>
               <h1 className="text-4xl font-bold text-gray-900">Manager Dashboard</h1>
               <p className="text-lg text-gray-700 mt-1">Welcome back, {user?.name || user?.email}</p>
-              <p className="text-sm text-amber-600 font-medium">Role: {role}</p>
-              <div className="mt-3 flex gap-3 text-sm">
-                <span className={`px-3 py-1 rounded-full ${roles.is_admin ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-gray-100 text-gray-600'}`}>
-                  Admin: {roles.is_admin ? 'Yes' : 'No'}
-                </span>
-                <span className={`px-3 py-1 rounded-full ${roles.is_manager ? 'bg-blue-100 text-blue-800 border border-blue-200' : 'bg-gray-100 text-gray-600'}`}>
-                  Manager: {roles.is_manager ? 'Yes' : 'No'}
-                </span>
-                <span className={`px-3 py-1 rounded-full ${roles.is_member ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-gray-100 text-gray-600'}`}>
-                  Member: {roles.is_member ? 'Yes' : 'No'}
-                </span>
-              </div>
             </div>
             <button
               onClick={handleLogout}
@@ -62,60 +116,161 @@ const ManagerDashboard = () => {
                 OnCall Scheduler Manager Panel
               </h2>
               <p className="text-lg text-gray-700 mb-2">
-                Manage team schedules and oversee operations
+                Manage teams and invite members
               </p>
               <p className="text-sm text-gray-600">
                 Lead your team with comprehensive management tools
               </p>
             </div>
             
-            {/* Manager Features */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-2xl shadow-lg border border-blue-200 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Team Management</h3>
-                  <p className="text-gray-700 mb-6">Manage team members, assignments, and organizational structure</p>
-                  <button className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
-                    Manage Team
-                  </button>
+            {/* Tab Navigation */}
+            <div className="flex space-x-1 mb-8 bg-gray-100 p-1 rounded-xl">
+              <button
+                onClick={() => setActiveTab('teams')}
+                className={`flex-1 py-3 px-6 rounded-lg font-medium transition-all duration-200 ${
+                  activeTab === 'teams'
+                    ? 'bg-white text-blue-600 shadow-md'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center justify-center space-x-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <span>Manage Teams</span>
                 </div>
-              </div>
-              
-              <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-8 rounded-2xl shadow-lg border border-amber-200 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-amber-500 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Schedule Overview</h3>
-                  <p className="text-gray-700 mb-6">View, create, and manage team schedules and rotations</p>
-                  <button className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
-                    View Schedules
-                  </button>
+              </button>
+              <button
+                onClick={() => setActiveTab('invitations')}
+                className={`flex-1 py-3 px-6 rounded-lg font-medium transition-all duration-200 ${
+                  activeTab === 'invitations'
+                    ? 'bg-white text-green-600 shadow-md'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center justify-center space-x-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  <span>Invite Members</span>
                 </div>
-              </div>
-              
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-8 rounded-2xl shadow-lg border border-green-200 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Reports & Analytics</h3>
-                  <p className="text-gray-700 mb-6">Generate comprehensive team performance and incident reports</p>
-                  <button className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
-                    View Reports
-                  </button>
-                </div>
-              </div>
+              </button>
             </div>
+
+            {/* Error Display */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+                {error}
+              </div>
+            )}
+
+            {/* Tab Content */}
+            {activeTab === 'teams' && (
+              <div className="space-y-6">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border border-blue-200">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Team</h3>
+                  <form onSubmit={handleCreateTeam} className="space-y-4">
+                    <div className="flex gap-4">
+                      <input
+                        type="text"
+                        value={newTeamName}
+                        onChange={(e) => setNewTeamName(e.target.value)}
+                        placeholder="Enter team name"
+                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                      >
+                        {loading ? 'Creating...' : 'Create Team'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4">Teams ({teams.length})</h3>
+                  {teams.length === 0 ? (
+                    <p className="text-gray-500 text-center py-8">No teams created yet</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {teams.map((team) => (
+                        <div key={team.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                          <div>
+                            <h4 className="font-semibold text-gray-900">{team.team_name}</h4>
+                            <p className="text-sm text-blue-600 font-medium">Organization: {team.organization_name}</p>
+                            <p className="text-sm text-gray-500">Created: {new Date(team.created_at).toLocaleDateString()}</p>
+                          </div>
+                          <div className="flex space-x-2">
+                            <button className="text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                            <button className="text-red-600 hover:text-red-800 font-medium">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'invitations' && (
+              <div className="space-y-6">
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-xl border border-green-200">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4">Invite New Member</h3>
+                  <form onSubmit={handleInviteMember} className="space-y-4">
+                    <div className="flex gap-4">
+                      <input
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="Enter member email address"
+                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        required
+                        disabled={loading}
+                      />
+                      <select
+                        value={selectedTeam}
+                        onChange={(e) => setSelectedTeam(e.target.value)}
+                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent min-w-[200px]"
+                        required
+                        disabled={loading}
+                      >
+                        <option value="">Select Team</option>
+                        {teams.filter(team => team.is_active).map((team) => (
+                          <option key={team.id} value={team.id}>
+                            {team.team_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={loading || !inviteEmail.trim() || !selectedTeam}
+                        className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                      >
+                        {loading ? 'Sending...' : 'Send Invitation'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="bg-white p-6 rounded-xl border border-gray-200">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4">Invitation Info</h3>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-blue-800">
+                      <strong>How it works:</strong> When you invite a member, they will receive an email with a secure registration link. 
+                      They can use this link to create their account and join your organization.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </main>

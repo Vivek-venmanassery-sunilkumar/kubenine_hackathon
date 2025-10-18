@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { logout } from '../store/authSlice';
 import authService from '../services/authService';
+import adminService from '../services/adminService';
 
 const AdminDashboard = () => {
   const { user, role } = useSelector((state) => state.auth);
@@ -12,9 +13,38 @@ const AdminDashboard = () => {
   const [organizations, setOrganizations] = useState([]);
   const [managers, setManagers] = useState([]);
   const [newOrgName, setNewOrgName] = useState('');
+  const [selectedManager, setSelectedManager] = useState('');
   const [newManagerName, setNewManagerName] = useState('');
   const [newManagerEmail, setNewManagerEmail] = useState('');
-  const [selectedOrg, setSelectedOrg] = useState('');
+  const [newManagerPassword, setNewManagerPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Load data on component mount
+  useEffect(() => {
+    loadOrganizations();
+    loadManagers();
+  }, []);
+
+  const loadOrganizations = async () => {
+    try {
+      const response = await adminService.organizations.getAll();
+      setOrganizations(response.data);
+    } catch (error) {
+      console.error('Error loading organizations:', error);
+      setError('Failed to load organizations');
+    }
+  };
+
+  const loadManagers = async () => {
+    try {
+      const response = await adminService.managers.getAll();
+      setManagers(response.data);
+    } catch (error) {
+      console.error('Error loading managers:', error);
+      setError('Failed to load managers');
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -28,34 +58,49 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleCreateOrganization = (e) => {
+  const handleCreateOrganization = async (e) => {
     e.preventDefault();
-    if (newOrgName.trim()) {
-      const newOrg = {
-        id: Date.now(),
-        name: newOrgName.trim(),
-        createdAt: new Date().toISOString()
-      };
-      setOrganizations([...organizations, newOrg]);
-      setNewOrgName('');
+    if (newOrgName.trim() && selectedManager) {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await adminService.organizations.create({
+          org_name: newOrgName.trim(),
+          manager_id: parseInt(selectedManager)
+        });
+        setOrganizations([...organizations, response.data]);
+        setNewOrgName('');
+        setSelectedManager('');
+      } catch (error) {
+        console.error('Error creating organization:', error);
+        setError('Failed to create organization: ' + (error.response?.data?.detail || error.message));
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
-  const handleCreateManager = (e) => {
+  const handleCreateManager = async (e) => {
     e.preventDefault();
-    if (newManagerName.trim() && newManagerEmail.trim() && selectedOrg) {
-      const newManager = {
-        id: Date.now(),
-        name: newManagerName.trim(),
-        email: newManagerEmail.trim(),
-        organizationId: selectedOrg,
-        organizationName: organizations.find(org => org.id === selectedOrg)?.name || '',
-        createdAt: new Date().toISOString()
-      };
-      setManagers([...managers, newManager]);
-      setNewManagerName('');
-      setNewManagerEmail('');
-      setSelectedOrg('');
+    if (newManagerName.trim() && newManagerEmail.trim() && newManagerPassword.trim()) {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await adminService.managers.register({
+          name: newManagerName.trim(),
+          email: newManagerEmail.trim(),
+          password: newManagerPassword.trim()
+        });
+        setManagers([...managers, response.data]);
+        setNewManagerName('');
+        setNewManagerEmail('');
+        setNewManagerPassword('');
+      } catch (error) {
+        console.error('Error creating manager:', error);
+        setError('Failed to create manager: ' + (error.response?.data?.detail || error.message));
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -129,26 +174,53 @@ const AdminDashboard = () => {
               </button>
             </div>
 
+            {/* Error Display */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+                {error}
+              </div>
+            )}
+
             {/* Tab Content */}
             {activeTab === 'organizations' && (
               <div className="space-y-6">
                 <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-6 rounded-xl border border-amber-200">
                   <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Organization</h3>
-                  <form onSubmit={handleCreateOrganization} className="flex gap-4">
-                    <input
-                      type="text"
-                      value={newOrgName}
-                      onChange={(e) => setNewOrgName(e.target.value)}
-                      placeholder="Enter organization name"
-                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                      required
-                    />
-                    <button
-                      type="submit"
-                      className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg"
-                    >
-                      Create Organization
-                    </button>
+                  <form onSubmit={handleCreateOrganization} className="space-y-4">
+                    <div className="flex gap-4">
+                      <input
+                        type="text"
+                        value={newOrgName}
+                        onChange={(e) => setNewOrgName(e.target.value)}
+                        placeholder="Enter organization name"
+                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                        required
+                        disabled={loading}
+                      />
+                      <select
+                        value={selectedManager}
+                        onChange={(e) => setSelectedManager(e.target.value)}
+                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent min-w-[200px]"
+                        required
+                        disabled={loading}
+                      >
+                        <option value="">Select Manager</option>
+                        {managers.map((manager) => (
+                          <option key={manager.id} value={manager.id}>
+                            {manager.name} ({manager.email})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                      >
+                        {loading ? 'Creating...' : 'Create Organization'}
+                      </button>
+                    </div>
                   </form>
                 </div>
 
@@ -161,8 +233,11 @@ const AdminDashboard = () => {
                       {organizations.map((org) => (
                         <div key={org.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                           <div>
-                            <h4 className="font-semibold text-gray-900">{org.name}</h4>
-                            <p className="text-sm text-gray-500">Created: {new Date(org.createdAt).toLocaleDateString()}</p>
+                            <h4 className="font-semibold text-gray-900">{org.org_name}</h4>
+                            {org.manager_name && (
+                              <p className="text-sm text-blue-600 font-medium">Manager: {org.manager_name} ({org.manager_email})</p>
+                            )}
+                            <p className="text-sm text-gray-500">Created: {new Date(org.created_at).toLocaleDateString()}</p>
                           </div>
                           <div className="flex space-x-2">
                             <button className="text-amber-600 hover:text-amber-800 font-medium">Edit</button>
@@ -181,7 +256,7 @@ const AdminDashboard = () => {
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border border-blue-200">
                   <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Manager</h3>
                   <form onSubmit={handleCreateManager} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <input
                         type="text"
                         value={newManagerName}
@@ -189,6 +264,7 @@ const AdminDashboard = () => {
                         placeholder="Manager name"
                         className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         required
+                        disabled={loading}
                       />
                       <input
                         type="email"
@@ -197,27 +273,26 @@ const AdminDashboard = () => {
                         placeholder="Manager email"
                         className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         required
+                        disabled={loading}
+                      />
+                      <input
+                        type="password"
+                        value={newManagerPassword}
+                        onChange={(e) => setNewManagerPassword(e.target.value)}
+                        placeholder="Manager password (min 8 characters)"
+                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                        minLength={8}
+                        disabled={loading}
                       />
                     </div>
-                    <div className="flex gap-4">
-                      <select
-                        value={selectedOrg}
-                        onChange={(e) => setSelectedOrg(e.target.value)}
-                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                      >
-                        <option value="">Select Organization</option>
-                        {organizations.map((org) => (
-                          <option key={org.id} value={org.id}>
-                            {org.name}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="flex justify-end">
                       <button
                         type="submit"
-                        className="bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg"
+                        disabled={loading}
+                        className="bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
                       >
-                        Create Manager
+                        {loading ? 'Creating...' : 'Create Manager'}
                       </button>
                     </div>
                   </form>
@@ -234,7 +309,6 @@ const AdminDashboard = () => {
                           <div>
                             <h4 className="font-semibold text-gray-900">{manager.name}</h4>
                             <p className="text-sm text-gray-600">{manager.email}</p>
-                            <p className="text-sm text-amber-600 font-medium">Organization: {manager.organizationName}</p>
                             <p className="text-sm text-gray-500">Created: {new Date(manager.createdAt).toLocaleDateString()}</p>
                           </div>
                           <div className="flex space-x-2">

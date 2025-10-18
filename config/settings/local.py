@@ -13,6 +13,9 @@ SECRET_KEY = env(
 # https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts
 ALLOWED_HOSTS = ["localhost", "0.0.0.0", "127.0.0.1"]
 
+# Frontend URL for invitation links
+FRONTEND_URL = "http://localhost:5173"
+
 # CACHES
 # ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/ref/settings/#caches
@@ -27,6 +30,14 @@ CACHES = {
 # ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/ref/settings/#email-backend
 EMAIL_BACKEND = env("DJANGO_EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+
+# SMTP Configuration for Gmail
+EMAIL_HOST = env("DJANGO_EMAIL_HOST", default="smtp.gmail.com")
+EMAIL_PORT = env("DJANGO_EMAIL_PORT", default=587)
+EMAIL_USE_TLS = env("DJANGO_EMAIL_USE_TLS", default=True)
+EMAIL_HOST_USER = env("DJANGO_EMAIL_HOST_USER", default="hopinn.travelsolutions@gmail.com")
+EMAIL_HOST_PASSWORD = env("DJANGO_EMAIL_HOST_PASSWORD", default="qbqzhbgwxjwbhxcj")
+DEFAULT_FROM_EMAIL = env("DJANGO_DEFAULT_FROM_EMAIL", default="hopinn.travelsolutions@gmail.com")
 
 # WhiteNoise
 # ------------------------------------------------------------------------------

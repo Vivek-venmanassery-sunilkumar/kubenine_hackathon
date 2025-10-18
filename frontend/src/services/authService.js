@@ -101,6 +101,20 @@ class AuthService {
       );
     }
   }
+
+  // Register with invitation
+  async registerWithInvitation(data) {
+    try {
+      const response = await api.post('/auth/register/invitation/', data);
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data?.error || 
+        error.response?.data?.detail || 
+        'Registration with invitation failed'
+      );
+    }
+  }
 }
 
 export default new AuthService();

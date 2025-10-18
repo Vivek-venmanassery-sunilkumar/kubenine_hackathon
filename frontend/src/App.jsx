@@ -3,6 +3,7 @@ import { Provider } from 'react-redux'
 import { store } from './store'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
+import RegisterWithInvitation from './pages/RegisterWithInvitation'
 import AdminDashboard from './pages/AdminDashboard'
 import ManagerDashboard from './pages/ManagerDashboard'
 import MemberDashboard from './pages/MemberDashboard'
@@ -18,6 +19,7 @@ function App() {
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterWithInvitation />} />
             <Route path="/unauthorized" element={<UnauthorizedPage />} />
             
             {/* Protected Routes */}

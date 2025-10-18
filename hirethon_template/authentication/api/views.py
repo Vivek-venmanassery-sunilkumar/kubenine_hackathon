@@ -236,3 +236,101 @@ def get_roles(request):
 # def user_profile(request):
 #     """All authenticated users can access this view."""
 #     pass
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_with_invitation(request):
+    """
+    Register a new member user using an invitation token.
+    """
+    from hirethon_template.manager_dashboard.models import Invitation, TeamMembers
+    
+    token = request.data.get('token')
+    email = request.data.get('email')
+    name = request.data.get('name')
+    password = request.data.get('password')
+    team_id = request.data.get('team_id')
+    
+    if not all([token, email, name, password, team_id]):
+        return Response(
+            {"error": "Token, email, name, password, and team_id are required."}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        # Validate invitation
+        invitation = Invitation.objects.get(
+            token=token,
+            email=email,
+            team_id=team_id,
+            status='pending'
+        )
+        
+        # Check if invitation is expired
+        if invitation.is_expired():
+            invitation.status = 'expired'
+            invitation.save()
+            return Response(
+                {"error": "Invitation has expired."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if user already exists
+        if User.objects.filter(email=email).exists():
+            return Response(
+                {"error": "User with this email already exists."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create the member user
+        user = User.objects.create_user(
+            email=email,
+            password=password,
+            name=name,
+            role=UserRole.MEMBER
+        )
+        
+        # Add user to team
+        TeamMembers.objects.create(
+            team=invitation.team,
+            member=user
+        )
+        
+        # Mark invitation as accepted
+        from django.utils import timezone
+        invitation.status = 'accepted'
+        invitation.accepted_at = timezone.now()
+        invitation.save()
+        
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        access_token = refresh.access_token
+        
+        return Response(
+            {
+                "message": "Registration successful.",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "name": user.name,
+                    "role": user.role
+                },
+                "tokens": {
+                    "access": str(access_token),
+                    "refresh": str(refresh)
+                }
+            },
+            status=status.HTTP_201_CREATED
+        )
+        
+    except Invitation.DoesNotExist:
+        return Response(
+            {"error": "Invalid invitation token or invitation not found."}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    except Exception as e:
+        return Response(
+            {"error": f"Registration failed: {str(e)}"}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

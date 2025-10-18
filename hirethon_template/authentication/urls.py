@@ -12,6 +12,7 @@ urlpatterns = [
 
     # Registration endpoints
     path("register/manager/", views.register_manager, name="register-manager"),
+    path("register/invitation/", views.register_with_invitation, name="register-invitation"),
     # path("register/member/", views.register_member, name="register-member"),
     # path("register/admin/", views.register_admin, name="register-admin"),
 
