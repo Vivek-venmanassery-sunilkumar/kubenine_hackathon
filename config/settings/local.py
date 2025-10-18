@@ -68,5 +68,18 @@ ADMIN_SITE_HEADER = "{} Admin (Development)".format("hirethon_template".title())
 ADMIN_SITE_TITLE = "{} Admin Portal (Development)".format("hirethon_template".title())
 ADMIN_INDEX_TITLE = "Welcome to {} Admin Portal (Development)".format("hirethon_template".title())
 
+# CORS Settings for Local Development
+# ------------------------------------------------------------------------------
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Vite frontend
+    "http://127.0.0.1:5173",
+    "http://0.0.0.0:5173",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_ALL_ORIGINS = True  # Only for local development
+
+
 # Your stuff...
 # ------------------------------------------------------------------------------

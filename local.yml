@@ -68,3 +68,20 @@ services:
     ports:
       - '5555:5555'
     command: /start-flower
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: hirethon_template_local_frontend
+    container_name: hirethon_template_local_frontend
+    depends_on:
+      - django
+    volumes:
+      - ./frontend:/app:z
+      - /app/node_modules
+    ports:
+      - '5173:5173'
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/
+    command: npm run dev -- --host 0.0.0.0
