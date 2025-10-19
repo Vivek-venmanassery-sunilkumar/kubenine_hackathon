@@ -15,6 +15,7 @@ const MemberDashboard = () => {
   const [schedule, setSchedule] = useState({});
   const [mySlots, setMySlots] = useState([]);
   const [teamSchedule, setTeamSchedule] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [swapRequests, setSwapRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -43,17 +44,20 @@ const MemberDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const [scheduleResponse, mySlotsResponse, teamScheduleResponse, swapRequestsResponse] = await Promise.all([
+      const [scheduleResponse, mySlotsResponse, teamScheduleResponse, teamMembersResponse, swapRequestsResponse] = await Promise.all([
         memberService.schedule.getMySchedule(),
         memberService.schedule.getMySlots(),
         memberService.schedule.getTeamSchedule(),
+        memberService.teamMembers.getAll(),
         memberService.swapRequests.getAll()
       ]);
 
-      setSchedule(scheduleResponse.data.schedule || {});
-      setMySlots(mySlotsResponse.data.slots || []);
-      setTeamSchedule(teamScheduleResponse.data.schedules || []);
-      setSwapRequests(swapRequestsResponse.data || []);
+      // The API response structure has the data directly in the response
+      setSchedule(scheduleResponse.schedule || {});
+      setMySlots(mySlotsResponse.slots || []);
+      setTeamSchedule(teamScheduleResponse.schedules || []);
+      setTeamMembers(teamMembersResponse.members || []);
+      setSwapRequests(swapRequestsResponse || []);
     } catch (error) {
       console.error('Error loading schedule data:', error);
       setError(getErrorMessage(error));
@@ -138,6 +142,43 @@ const MemberDashboard = () => {
   // Get slots for a specific date
   const getSlotsForDate = (date) => {
     return schedule[date] || [];
+  };
+
+  // Get member name for a slot
+  const getMemberName = (slot) => {
+    // Use the new API fields if available
+    if (slot.assigned_member_name) {
+      return slot.assigned_member_name;
+    }
+    
+    // Fallback to old logic if new fields not available
+    if (slot.assigned_member) {
+      // If assigned_member is an object with name property
+      if (typeof slot.assigned_member === 'object' && slot.assigned_member.name) {
+        return slot.assigned_member.name;
+      }
+      
+      // If assigned_member is just an ID, try to find the member in team members
+      if (typeof slot.assigned_member === 'number' && teamMembers && Array.isArray(teamMembers)) {
+        const member = teamMembers.find(m => 
+          m.member === slot.assigned_member || 
+          m.id === slot.assigned_member ||
+          m.member_id === slot.assigned_member
+        );
+        if (member) {
+          return member.member_name || member.name || `Member ${slot.assigned_member}`;
+        }
+      }
+      
+      // Fallback to member ID
+      return `Member ${slot.assigned_member}`;
+    }
+    return 'Unassigned';
+  };
+
+  // Check if a slot belongs to the current user
+  const isMySlot = (slot) => {
+    return slot.is_my_slot || (slot.assigned_member && slot.assigned_member === user?.id);
   };
 
   // Format time for display
@@ -255,43 +296,48 @@ const MemberDashboard = () => {
                           {slots.length === 0 ? (
                             <p className="text-gray-400 text-sm text-center py-4">No slots</p>
                           ) : (
-                            slots.map((slot) => (
-                              <div
-                                key={slot.id}
-                                onClick={() => handleSlotClick(slot)}
-                                className={`p-2 rounded-lg text-xs cursor-pointer transition-all duration-200 ${
-                                  slot.is_my_slot
-                                    ? slot.can_swap
-                                      ? 'bg-green-100 border border-green-300 hover:bg-green-200 hover:shadow-md'
-                                      : 'bg-green-200 border border-green-400'
-                                    : 'bg-gray-100 border border-gray-300'
-                                }`}
-                              >
-                                <div className="font-medium text-gray-900">
-                                  {formatTime(slot.start_datetime)} - {formatTime(slot.end_datetime)}
-                                </div>
-                                <div className="text-gray-600">
-                                  {slot.duration_hours}h
-                                </div>
-                                {slot.is_my_slot && (
-                                  <div className="text-green-700 font-medium">
-                                    {slot.can_swap ? 'Click to swap' : 'Your slot'}
+                            slots.map((slot) => {
+                              const isMySlotFlag = isMySlot(slot);
+                              const memberName = getMemberName(slot);
+                              
+                              return (
+                                <div
+                                  key={slot.id}
+                                  onClick={() => handleSlotClick(slot)}
+                                  className={`p-2 rounded-lg text-xs cursor-pointer transition-all duration-200 ${
+                                    isMySlotFlag
+                                      ? slot.can_swap
+                                        ? 'bg-blue-100 border border-blue-300 hover:bg-blue-200 hover:shadow-md'
+                                        : 'bg-blue-200 border border-blue-400'
+                                      : 'bg-gray-100 border border-gray-300'
+                                  }`}
+                                >
+                                  <div className="font-medium text-gray-900">
+                                    {formatTime(slot.start_datetime)} - {formatTime(slot.end_datetime)}
                                   </div>
-                                )}
-                                {!slot.is_my_slot && slot.assigned_member && (
                                   <div className="text-gray-600">
-                                    {slot.assigned_member.name || slot.assigned_member.email}
+                                    {slot.duration_hours}h
                                   </div>
-                                )}
-                                {slot.swap_status && (
-                                  <div className={`text-xs ${
-                                    slot.swap_status.status === 'pending' ? 'text-yellow-600' : 'text-blue-600'
+                                  <div className={`font-medium ${
+                                    isMySlotFlag ? 'text-blue-700' : 'text-gray-600'
                                   }`}>
-                                    {slot.swap_status.status === 'pending' ? 'Swap pending' : 'Swap received'}
+                                    {isMySlotFlag ? 'You' : memberName}
                                   </div>
-                                )}
-                              </div>
-                            ))
+                                  {isMySlotFlag && slot.can_swap && (
+                                    <div className="text-blue-600 text-xs">
+                                      Click to swap
+                                    </div>
+                                  )}
+                                  {slot.swap_status && (
+                                    <div className={`text-xs ${
+                                      slot.swap_status.status === 'pending' ? 'text-yellow-600' : 'text-blue-600'
+                                    }`}>
+                                      {slot.swap_status.status === 'pending' ? 'Swap pending' : 'Swap received'}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })
                           )}
                         </div>
                       </div>
@@ -312,7 +358,7 @@ const MemberDashboard = () => {
                           <div className="flex justify-between items-start">
                             <div>
                               <p className="font-medium text-gray-900">
-                                {request.requester_name} wants to swap with {request.responder_name}
+                                {request.requester_name || 'Unknown'} wants to swap with {request.responder_name || 'Unknown'}
                               </p>
                               <p className="text-sm text-gray-600">
                                 Status: <span className={`font-medium ${
@@ -379,7 +425,7 @@ const MemberDashboard = () => {
                       {formatTime(slot.start_datetime)} - {formatTime(slot.end_datetime)}
                     </div>
                     <div className="text-sm text-gray-600">
-                      {slot.duration_hours}h with {slot.assigned_member.name || slot.assigned_member.email}
+                      {slot.duration_hours}h with {getMemberName(slot)}
                     </div>
                   </button>
                 ))

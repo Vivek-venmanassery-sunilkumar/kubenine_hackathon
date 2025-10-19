@@ -14,6 +14,8 @@ class TimeslotSerializer(serializers.ModelSerializer):
     
     duration_hours = serializers.ReadOnlyField()
     team_name = serializers.CharField(source='schedule.team.team_name', read_only=True)
+    assigned_member_name = serializers.SerializerMethodField()
+    assigned_member_email = serializers.SerializerMethodField()
     is_my_slot = serializers.SerializerMethodField()
     can_swap = serializers.SerializerMethodField()
     swap_status = serializers.SerializerMethodField()
@@ -22,9 +24,21 @@ class TimeslotSerializer(serializers.ModelSerializer):
         model = Timeslot
         fields = [
             'id', 'start_datetime', 'end_datetime', 'duration_hours',
-            'assigned_member', 'is_break', 'team_name', 'is_my_slot',
-            'can_swap', 'swap_status', 'created_at'
+            'assigned_member', 'assigned_member_name', 'assigned_member_email',
+            'is_break', 'team_name', 'is_my_slot', 'can_swap', 'swap_status', 'created_at'
         ]
+    
+    def get_assigned_member_name(self, obj):
+        """Get the name of the assigned member."""
+        if obj.assigned_member:
+            return obj.assigned_member.name or obj.assigned_member.email
+        return None
+    
+    def get_assigned_member_email(self, obj):
+        """Get the email of the assigned member."""
+        if obj.assigned_member:
+            return obj.assigned_member.email
+        return None
     
     def get_is_my_slot(self, obj):
         """Check if this timeslot is assigned to the current user."""
