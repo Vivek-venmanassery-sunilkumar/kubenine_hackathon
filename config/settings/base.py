@@ -89,6 +89,7 @@ LOCAL_APPS = [
     "hirethon_template.authentication",
     "hirethon_template.admin_dashboard",
     "hirethon_template.manager_dashboard",
+    "hirethon_template.assign_task",
     # Your stuff: custom apps go here
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
@@ -296,6 +297,31 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_WORKER_SEND_TASK_EVENTS = True
 # https://docs.celeryq.dev/en/stable/userguide/configuration.html#std-setting-task_send_sent_event
 CELERY_TASK_SEND_SENT_EVENT = True
+
+# Celery Beat Schedule for Automatic Scheduling
+CELERY_BEAT_SCHEDULE = {
+    'generate-weekly-schedules': {
+        'task': 'hirethon_template.assign_task.tasks.generate_weekly_schedules',
+        'schedule': 0.0,  # Run every Sunday at midnight
+        'options': {
+            'crontab': '0 0 * * 0',  # Every Sunday at 00:00
+        }
+    },
+    'validate-draft-schedules': {
+        'task': 'hirethon_template.assign_task.tasks.validate_all_draft_schedules',
+        'schedule': 0.0,  # Run daily
+        'options': {
+            'crontab': '0 6 * * *',  # Every day at 06:00
+        }
+    },
+    'auto-publish-schedules': {
+        'task': 'hirethon_template.assign_task.tasks.auto_publish_valid_schedules',
+        'schedule': 0.0,  # Run on Monday morning
+        'options': {
+            'crontab': '0 8 * * 1',  # Every Monday at 08:00
+        }
+    },
+}
 # django-allauth
 # ------------------------------------------------------------------------------
 ACCOUNT_ALLOW_REGISTRATION = env.bool("DJANGO_ACCOUNT_ALLOW_REGISTRATION", True)

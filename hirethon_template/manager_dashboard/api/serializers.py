@@ -99,6 +99,65 @@ class InvitationCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Manager is not assigned to any organization.")
         return value
     
+    def validate(self, data):
+        """Validate that the email hasn't already been accepted for this team and isn't already a team member."""
+        email = data.get('email')
+        team = data.get('team')
+        
+        if email and team:
+            # Check if there's already an accepted invitation for this email and team
+            existing_accepted = Invitation.objects.filter(
+                email=email,
+                team=team,
+                status='accepted'
+            ).exists()
+            
+            if existing_accepted:
+                raise serializers.ValidationError({
+                    'email': 'This email has already been accepted for this team.'
+                })
+            
+            # Check if there's a pending invitation for this email and team
+            existing_pending = Invitation.objects.filter(
+                email=email,
+                team=team,
+                status='pending'
+            ).exists()
+            
+            if existing_pending:
+                raise serializers.ValidationError({
+                    'email': 'A pending invitation already exists for this email and team.'
+                })
+            
+            # Check if the email is already a member of any team
+            from hirethon_template.manager_dashboard.models import TeamMembers
+            from django.contrib.auth import get_user_model
+            
+            User = get_user_model()
+            try:
+                user = User.objects.get(email=email)
+                existing_membership = TeamMembers.objects.filter(
+                    member=user,
+                    is_active=True
+                ).exists()
+                
+                if existing_membership:
+                    # Get the team name for better error message
+                    membership = TeamMembers.objects.filter(
+                        member=user,
+                        is_active=True
+                    ).select_related('team').first()
+                    team_name = membership.team.team_name if membership else "another team"
+                    
+                    raise serializers.ValidationError({
+                        'email': f'This email is already a member of {team_name}. Members can only belong to one team at a time.'
+                    })
+            except User.DoesNotExist:
+                # User doesn't exist yet, which is fine for invitations
+                pass
+        
+        return data
+    
     def create(self, validated_data):
         """Create invitation with manager's organization."""
         user = self.context['request'].user

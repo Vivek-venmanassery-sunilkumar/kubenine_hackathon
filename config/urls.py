@@ -31,6 +31,8 @@ urlpatterns += [
     path("api/", include("config.api_router")),
     # Authentication API
     path("api/auth/", include("hirethon_template.authentication.urls", namespace="auth_api")),
+    # Schedule API
+    path("api/schedule/", include("hirethon_template.assign_task.urls", namespace="schedule_api")),
     # DRF auth token
     path("auth-token/", obtain_auth_token),
     path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),

@@ -1,4 +1,5 @@
 import api from './api';
+import { getErrorMessage, ERROR_TYPES } from '../utils/errorHandler';
 
 class AuthService {
   // Login user
@@ -10,11 +11,9 @@ class AuthService {
       });
       return response.data;
     } catch (error) {
-      throw new Error(
-        error.response?.data?.error || 
-        error.response?.data?.detail || 
-        'Login failed'
-      );
+      // The error is already structured by the API interceptor
+      const message = getErrorMessage(error);
+      throw new Error(message);
     }
   }
 
@@ -24,11 +23,8 @@ class AuthService {
       const response = await api.post('/auth/logout/');
       return response.data;
     } catch (error) {
-      throw new Error(
-        error.response?.data?.error || 
-        error.response?.data?.detail || 
-        'Logout failed'
-      );
+      const message = getErrorMessage(error);
+      throw new Error(message);
     }
   }
 
@@ -38,11 +34,8 @@ class AuthService {
       const response = await api.post('/auth/refresh/');
       return response.data;
     } catch (error) {
-      throw new Error(
-        error.response?.data?.error || 
-        error.response?.data?.detail || 
-        'Token refresh failed'
-      );
+      const message = getErrorMessage(error);
+      throw new Error(message);
     }
   }
 
@@ -56,11 +49,8 @@ class AuthService {
       });
       return response.data;
     } catch (error) {
-      throw new Error(
-        error.response?.data?.error || 
-        error.response?.data?.detail || 
-        'Manager registration failed'
-      );
+      const message = getErrorMessage(error);
+      throw new Error(message);
     }
   }
 
@@ -70,11 +60,8 @@ class AuthService {
       const response = await api.get('/users/me/');
       return response.data;
     } catch (error) {
-      throw new Error(
-        error.response?.data?.error || 
-        error.response?.data?.detail || 
-        'Failed to get user info'
-      );
+      const message = getErrorMessage(error);
+      throw new Error(message);
     }
   }
 
@@ -84,6 +71,8 @@ class AuthService {
       const response = await api.get('/users/me/');
       return response.data;
     } catch (error) {
+      // For auth check, we don't want to throw errors
+      // Just return null if not authenticated
       return null;
     }
   }
@@ -94,11 +83,8 @@ class AuthService {
       const response = await api.get('/auth/roles/');
       return response.data;
     } catch (error) {
-      throw new Error(
-        error.response?.data?.error || 
-        error.response?.data?.detail || 
-        'Failed to get user roles'
-      );
+      const message = getErrorMessage(error);
+      throw new Error(message);
     }
   }
 
@@ -108,12 +94,19 @@ class AuthService {
       const response = await api.post('/auth/register/invitation/', data);
       return response.data;
     } catch (error) {
-      throw new Error(
-        error.response?.data?.error || 
-        error.response?.data?.detail || 
-        'Registration with invitation failed'
-      );
+      const message = getErrorMessage(error);
+      throw new Error(message);
     }
+  }
+
+  // Helper method to check if error is a specific type
+  isErrorType(error, type) {
+    return error.type === type;
+  }
+
+  // Helper method to get error details
+  getErrorDetails(error) {
+    return error.details || {};
   }
 }
 

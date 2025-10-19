@@ -13,17 +13,26 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('organizations');
   const [organizations, setOrganizations] = useState([]);
   const [managers, setManagers] = useState([]);
+  const [availableManagers, setAvailableManagers] = useState([]);
   const [newOrgName, setNewOrgName] = useState('');
   const [selectedManager, setSelectedManager] = useState('');
   const [newManagerName, setNewManagerName] = useState('');
   const [newManagerEmail, setNewManagerEmail] = useState('');
   const [newManagerPassword, setNewManagerPassword] = useState('');
+  const [editingManager, setEditingManager] = useState(null);
+  const [editManagerName, setEditManagerName] = useState('');
+  const [editManagerEmail, setEditManagerEmail] = useState('');
+  const [editManagerPassword, setEditManagerPassword] = useState('');
+  const [editingOrganization, setEditingOrganization] = useState(null);
+  const [editOrgName, setEditOrgName] = useState('');
+  const [editSelectedManager, setEditSelectedManager] = useState('');
   const [loading, setLoading] = useState(false);
 
   // Load data on component mount
   useEffect(() => {
     loadOrganizations();
     loadManagers();
+    loadAvailableManagers();
   }, []);
 
   const loadOrganizations = async () => {
@@ -43,6 +52,16 @@ const AdminDashboard = () => {
     } catch (error) {
       console.error('Error loading managers:', error);
       toast.error('Failed to load managers');
+    }
+  };
+
+  const loadAvailableManagers = async () => {
+    try {
+      const response = await adminService.managers.getAvailable();
+      setAvailableManagers(response.data.managers || []);
+    } catch (error) {
+      console.error('Error loading available managers:', error);
+      toast.error('Failed to load available managers');
     }
   };
 
@@ -70,6 +89,7 @@ const AdminDashboard = () => {
         setOrganizations([...organizations, response.data]);
         setNewOrgName('');
         setSelectedManager('');
+        loadAvailableManagers(); // Refresh available managers
         toast.success('Organization created successfully!');
       } catch (error) {
         console.error('Error creating organization:', error);
@@ -98,6 +118,96 @@ const AdminDashboard = () => {
       } catch (error) {
         console.error('Error creating manager:', error);
         toast.error('Failed to create manager: ' + (error.response?.data?.detail || error.message));
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleEditManager = (manager) => {
+    setEditingManager(manager);
+    setEditManagerName(manager.name || '');
+    setEditManagerEmail(manager.email || '');
+    setEditManagerPassword(''); // Don't pre-fill password for security
+  };
+
+  const handleCancelEdit = () => {
+    setEditingManager(null);
+    setEditManagerName('');
+    setEditManagerEmail('');
+    setEditManagerPassword('');
+  };
+
+  const handleUpdateManager = async (e) => {
+    e.preventDefault();
+    if (editingManager && editManagerName.trim() && editManagerEmail.trim()) {
+      setLoading(true);
+      try {
+        const updateData = {
+          name: editManagerName.trim(),
+          email: editManagerEmail.trim()
+        };
+        
+        // Only include password if it's provided
+        if (editManagerPassword.trim()) {
+          updateData.password = editManagerPassword.trim();
+        }
+
+        const response = await adminService.managers.update(editingManager.id, updateData);
+        
+        // Update the managers list
+        setManagers(managers.map(manager => 
+          manager.id === editingManager.id ? response.data : manager
+        ));
+        
+        // Reset form
+        handleCancelEdit();
+        toast.success('Manager updated successfully!');
+      } catch (error) {
+        console.error('Error updating manager:', error);
+        toast.error('Failed to update manager: ' + (error.response?.data?.detail || error.message));
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleEditOrganization = (organization) => {
+    setEditingOrganization(organization);
+    setEditOrgName(organization.org_name || '');
+    setEditSelectedManager(organization.manager_id ? organization.manager_id.toString() : '');
+  };
+
+  const handleCancelEditOrganization = () => {
+    setEditingOrganization(null);
+    setEditOrgName('');
+    setEditSelectedManager('');
+  };
+
+  const handleUpdateOrganization = async (e) => {
+    e.preventDefault();
+    if (editingOrganization && editOrgName.trim() && editSelectedManager) {
+      setLoading(true);
+      try {
+        const updateData = {
+          org_name: editOrgName.trim(),
+          manager_id: parseInt(editSelectedManager)
+        };
+
+        const response = await adminService.organizations.update(editingOrganization.id, updateData);
+        
+        // Update the organizations list
+        setOrganizations(organizations.map(org => 
+          org.id === editingOrganization.id ? response.data : org
+        ));
+        
+        // Reset form
+        handleCancelEditOrganization();
+        loadAvailableManagers(); // Refresh available managers
+        toast.success('Organization updated successfully!');
+      } catch (error) {
+        console.error('Error updating organization:', error);
+        toast.error('Failed to update organization: ' + (error.response?.data?.detail || error.message));
       } finally {
         setLoading(false);
       }
@@ -178,45 +288,115 @@ const AdminDashboard = () => {
             {/* Tab Content */}
             {activeTab === 'organizations' && (
               <div className="space-y-6">
-                <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-6 rounded-xl border border-amber-200">
-                  <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Organization</h3>
-                  <form onSubmit={handleCreateOrganization} className="space-y-4">
-                    <div className="flex gap-4">
-                      <input
-                        type="text"
-                        value={newOrgName}
-                        onChange={(e) => setNewOrgName(e.target.value)}
-                        placeholder="Enter organization name"
-                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                        required
-                        disabled={loading}
-                      />
-                      <select
-                        value={selectedManager}
-                        onChange={(e) => setSelectedManager(e.target.value)}
-                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent min-w-[200px]"
-                        required
-                        disabled={loading}
-                      >
-                        <option value="">Select Manager</option>
-                        {managers.map((manager) => (
-                          <option key={manager.id} value={manager.id}>
-                            {manager.name} ({manager.email})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
-                      >
-                        {loading ? 'Creating...' : 'Create Organization'}
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                {/* Create New Organization Form */}
+                {!editingOrganization && (
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-6 rounded-xl border border-amber-200">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Organization</h3>
+                    <form onSubmit={handleCreateOrganization} className="space-y-4">
+                      <div className="flex gap-4">
+                        <input
+                          type="text"
+                          value={newOrgName}
+                          onChange={(e) => setNewOrgName(e.target.value)}
+                          placeholder="Enter organization name"
+                          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                          required
+                          disabled={loading}
+                        />
+                        <select
+                          value={selectedManager}
+                          onChange={(e) => setSelectedManager(e.target.value)}
+                          className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent min-w-[200px]"
+                          required
+                          disabled={loading || availableManagers.length === 0}
+                        >
+                          <option value="">Select Manager</option>
+                          {availableManagers.length === 0 ? (
+                            <option value="" disabled>No available managers</option>
+                          ) : (
+                            availableManagers.map((manager) => (
+                              <option key={manager.id} value={manager.id}>
+                                {manager.name} ({manager.email})
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+                      {availableManagers.length === 0 && (
+                        <div className="text-amber-600 text-sm bg-amber-50 p-3 rounded-lg border border-amber-200">
+                          <strong>No available managers:</strong> All managers are already assigned to organizations. 
+                          Create a new manager first or reassign an existing manager.
+                        </div>
+                      )}
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                        >
+                          {loading ? 'Creating...' : 'Create Organization'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                {/* Edit Organization Form */}
+                {editingOrganization && (
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-xl border border-green-200">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Organization: {editingOrganization.org_name}</h3>
+                    <form onSubmit={handleUpdateOrganization} className="space-y-4">
+                      <div className="flex gap-4">
+                        <input
+                          type="text"
+                          value={editOrgName}
+                          onChange={(e) => setEditOrgName(e.target.value)}
+                          placeholder="Enter organization name"
+                          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          required
+                          disabled={loading}
+                        />
+                        <select
+                          value={editSelectedManager}
+                          onChange={(e) => setEditSelectedManager(e.target.value)}
+                          className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent min-w-[200px]"
+                          required
+                          disabled={loading}
+                        >
+                          <option value="">Select Manager</option>
+                          {/* Show current manager + available managers */}
+                          {editingOrganization && (
+                            <option value={editingOrganization.manager_id}>
+                              {editingOrganization.manager_name} ({editingOrganization.manager_email}) - Current
+                            </option>
+                          )}
+                          {availableManagers.map((manager) => (
+                            <option key={manager.id} value={manager.id}>
+                              {manager.name} ({manager.email})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex justify-end space-x-3">
+                        <button
+                          type="button"
+                          onClick={handleCancelEditOrganization}
+                          disabled={loading}
+                          className="bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                        >
+                          {loading ? 'Updating...' : 'Update Organization'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <h3 className="text-xl font-bold text-gray-900 mb-4">Organizations ({organizations.length})</h3>
@@ -234,8 +414,13 @@ const AdminDashboard = () => {
                             <p className="text-sm text-gray-500">Created: {new Date(org.created_at).toLocaleDateString()}</p>
                           </div>
                           <div className="flex space-x-2">
-                            <button className="text-amber-600 hover:text-amber-800 font-medium">Edit</button>
-                            <button className="text-red-600 hover:text-red-800 font-medium">Delete</button>
+                            <button 
+                              onClick={() => handleEditOrganization(org)}
+                              disabled={loading}
+                              className="text-amber-600 hover:text-amber-800 font-medium disabled:text-gray-400 disabled:cursor-not-allowed"
+                            >
+                              Edit
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -247,50 +432,108 @@ const AdminDashboard = () => {
 
             {activeTab === 'managers' && (
               <div className="space-y-6">
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border border-blue-200">
-                  <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Manager</h3>
-                  <form onSubmit={handleCreateManager} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <input
-                        type="text"
-                        value={newManagerName}
-                        onChange={(e) => setNewManagerName(e.target.value)}
-                        placeholder="Manager name"
-                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                        disabled={loading}
-                      />
-                      <input
-                        type="email"
-                        value={newManagerEmail}
-                        onChange={(e) => setNewManagerEmail(e.target.value)}
-                        placeholder="Manager email"
-                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                        disabled={loading}
-                      />
-                      <input
-                        type="password"
-                        value={newManagerPassword}
-                        onChange={(e) => setNewManagerPassword(e.target.value)}
-                        placeholder="Manager password (min 8 characters)"
-                        className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                        minLength={8}
-                        disabled={loading}
-                      />
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
-                      >
-                        {loading ? 'Creating...' : 'Create Manager'}
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                {/* Create New Manager Form */}
+                {!editingManager && (
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border border-blue-200">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Manager</h3>
+                    <form onSubmit={handleCreateManager} className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <input
+                          type="text"
+                          value={newManagerName}
+                          onChange={(e) => setNewManagerName(e.target.value)}
+                          placeholder="Manager name"
+                          className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                          disabled={loading}
+                        />
+                        <input
+                          type="email"
+                          value={newManagerEmail}
+                          onChange={(e) => setNewManagerEmail(e.target.value)}
+                          placeholder="Manager email"
+                          className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                          disabled={loading}
+                        />
+                        <input
+                          type="password"
+                          value={newManagerPassword}
+                          onChange={(e) => setNewManagerPassword(e.target.value)}
+                          placeholder="Manager password (min 8 characters)"
+                          className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                          minLength={8}
+                          disabled={loading}
+                        />
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                        >
+                          {loading ? 'Creating...' : 'Create Manager'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                {/* Edit Manager Form */}
+                {editingManager && (
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-xl border border-green-200">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Manager: {editingManager.name}</h3>
+                    <form onSubmit={handleUpdateManager} className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <input
+                          type="text"
+                          value={editManagerName}
+                          onChange={(e) => setEditManagerName(e.target.value)}
+                          placeholder="Manager name"
+                          className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          required
+                          disabled={loading}
+                        />
+                        <input
+                          type="email"
+                          value={editManagerEmail}
+                          onChange={(e) => setEditManagerEmail(e.target.value)}
+                          placeholder="Manager email"
+                          className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          required
+                          disabled={loading}
+                        />
+                        <input
+                          type="password"
+                          value={editManagerPassword}
+                          onChange={(e) => setEditManagerPassword(e.target.value)}
+                          placeholder="New password (leave blank to keep current)"
+                          className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          minLength={8}
+                          disabled={loading}
+                        />
+                      </div>
+                      <div className="flex justify-end space-x-3">
+                        <button
+                          type="button"
+                          onClick={handleCancelEdit}
+                          disabled={loading}
+                          className="bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg disabled:transform-none"
+                        >
+                          {loading ? 'Updating...' : 'Update Manager'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
 
                 <div className="bg-white p-6 rounded-xl border border-gray-200">
                   <h3 className="text-xl font-bold text-gray-900 mb-4">Managers ({managers.length})</h3>
@@ -306,8 +549,13 @@ const AdminDashboard = () => {
                             <p className="text-sm text-gray-500">Created: {new Date(manager.createdAt).toLocaleDateString()}</p>
                           </div>
                           <div className="flex space-x-2">
-                            <button className="text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                            <button className="text-red-600 hover:text-red-800 font-medium">Delete</button>
+                            <button 
+                              onClick={() => handleEditManager(manager)}
+                              disabled={loading}
+                              className="text-blue-600 hover:text-blue-800 font-medium disabled:text-gray-400 disabled:cursor-not-allowed"
+                            >
+                              Edit
+                            </button>
                           </div>
                         </div>
                       ))}

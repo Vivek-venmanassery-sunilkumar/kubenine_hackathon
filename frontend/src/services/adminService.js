@@ -54,15 +54,20 @@ export const managerService = {
   getAll: () => api.get('/admin/managers/'),
 
   /**
+   * Get managers who are not assigned to any organization
+   * @returns {Promise} API response with available managers list
+   */
+  getAvailable: () => api.get('/admin/managers/available/'),
+
+  /**
    * Register a new manager
    * @param {Object} data - Manager registration data
    * @param {string} data.name - Manager name
    * @param {string} data.email - Manager email
    * @param {string} data.password - Manager password (min 8 characters)
-   * @param {number} data.organization_id - Organization ID to assign manager to
    * @returns {Promise} API response with created manager data
    */
-  register: (data) => api.post('/admin/managers/', data),
+  register: (data) => api.post('/auth/register/manager/', data),
 
   /**
    * Get manager by ID
@@ -75,6 +80,9 @@ export const managerService = {
    * Update manager
    * @param {number} id - Manager ID
    * @param {Object} data - Updated manager data
+   * @param {string} data.name - Manager name
+   * @param {string} data.email - Manager email
+   * @param {string} [data.password] - New password (optional)
    * @returns {Promise} API response with updated manager
    */
   update: (id, data) => api.put(`/admin/managers/${id}/`, data),

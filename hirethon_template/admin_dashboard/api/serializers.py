@@ -18,11 +18,16 @@ class OrganizationSerializer(serializers.ModelSerializer):
         fields = ['id', 'org_name', 'manager_id', 'manager_name', 'manager_email', 'created_at', 'updated_at', 'is_active']
     
     def validate_manager_id(self, value):
-        """Check if manager exists and has manager role."""
+        """Check if manager exists, has manager role, and is not already assigned to an organization."""
         try:
-            User.objects.get(id=value, role=UserRole.MANAGER)
+            manager = User.objects.get(id=value, role=UserRole.MANAGER)
         except User.DoesNotExist:
             raise serializers.ValidationError("Manager does not exist or is not a manager.")
+        
+        # Check if manager is already assigned to an organization
+        if Organization.objects.filter(manager=manager, is_active=True).exists():
+            raise serializers.ValidationError("This manager is already assigned to an organization.")
+        
         return value
     
     def create(self, validated_data):
@@ -35,6 +40,21 @@ class OrganizationSerializer(serializers.ModelSerializer):
         
         organization = Organization.objects.create(**validated_data)
         return organization
+    
+    def update(self, instance, validated_data):
+        """Update organization and assign manager."""
+        manager_id = validated_data.pop('manager_id', None)
+        
+        if manager_id:
+            manager = User.objects.get(id=manager_id)
+            validated_data['manager'] = manager
+        
+        # Update the instance
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance
 
 
 class ManagerRegistrationSerializer(serializers.Serializer):
