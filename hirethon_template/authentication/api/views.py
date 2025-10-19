@@ -360,7 +360,7 @@ def register_with_invitation(request):
         )
         
         # Add user to team
-        TeamMembers.objects.create(
+        team_membership = TeamMembers.objects.create(
             team=invitation.team,
             member=user
         )
@@ -376,6 +376,11 @@ def register_with_invitation(request):
         invitation.status = 'accepted'
         invitation.accepted_at = django_timezone.now()
         invitation.save()
+        
+        # Trigger schedule regeneration for the team
+        # This will be handled by the Django signal automatically
+        print(f"Member {user.name} successfully added to team {invitation.team.team_name}")
+        print("Schedule regeneration will be triggered automatically via signals")
         
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)

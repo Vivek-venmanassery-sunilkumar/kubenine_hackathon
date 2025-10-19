@@ -172,24 +172,27 @@ def calculate_required_members(config):
 
 # Helper functions moved from views.py to avoid circular imports
 def generate_timeslots(schedule, config):
-    """Generate timeslots for a schedule based on configuration."""
+    """Generate timeslots for 24/7 coverage with 8-hour max per member per day."""
     from .models import Timeslot
     
     week_start = schedule.week_start_date
-    timeslot_duration = timedelta(hours=config.timeslot_duration_hours)
-    min_break = timedelta(hours=config.min_break_hours)
+    max_slot_duration = config.timeslot_duration_hours  # Maximum hours per slot
+    min_break_hours = config.min_break_hours
     
-    # Generate timeslots for the entire week (7 days) with 24/7 coverage
+    # Generate hourly timeslots for 24/7 coverage (168 hours total)
     current_datetime = timezone.make_aware(
         datetime.combine(week_start, datetime.min.time())
     )
     week_end = current_datetime + timedelta(days=7)
     
     timeslots = []
+    hour_count = 0
+    
+    # Generate 1-hour timeslots for the entire week
     while current_datetime < week_end:
-        end_datetime = current_datetime + timeslot_duration
+        end_datetime = current_datetime + timedelta(hours=1)
         
-        # Create timeslot
+        # Create hourly timeslot
         timeslot = Timeslot.objects.create(
             schedule=schedule,
             start_datetime=current_datetime,
@@ -198,11 +201,268 @@ def generate_timeslots(schedule, config):
         )
         timeslots.append(timeslot)
         
-        # Move to next timeslot immediately (no gap for 24/7 coverage)
         current_datetime = end_datetime
+        hour_count += 1
     
-    # Assign members to timeslots using round-robin
-    assign_members_to_timeslots(schedule, timeslots)
+    # Group timeslots by day for member assignment
+    daily_timeslots = {}
+    for timeslot in timeslots:
+        day = timeslot.start_datetime.date()
+        if day not in daily_timeslots:
+            daily_timeslots[day] = []
+        daily_timeslots[day].append(timeslot)
+    
+    # Assign members to timeslots with 8-hour daily limit
+    assign_members_with_daily_limits(schedule, daily_timeslots, max_slot_duration, min_break_hours)
+
+
+def assign_members_with_daily_limits(schedule, daily_timeslots, max_slot_duration, min_break_hours):
+    """Assign members to timeslots ensuring 24/7 coverage with 8-hour daily limits."""
+    team = schedule.team
+    active_members = list(team.members.filter(is_active=True).values_list('member', flat=True))
+    
+    if not active_members:
+        return
+    
+    # Process each day separately
+    for day, day_timeslots in daily_timeslots.items():
+        # Track daily hours for each member
+        daily_member_hours = {member_id: 0 for member_id in active_members}
+        weekly_member_hours = {member_id: 0 for member_id in active_members}  # Track weekly hours
+        
+        # Sort timeslots by start time
+        day_timeslots.sort(key=lambda x: x.start_datetime)
+        
+        # Assign members to each hour of the day
+        member_index = 0
+        for timeslot in day_timeslots:
+            # Find next available member for this hour
+            attempts = 0
+            assigned = False
+            
+            while attempts < len(active_members) and not assigned:
+                member_id = active_members[member_index]
+                
+                # Check constraints
+                can_assign = (
+                    daily_member_hours[member_id] < 8 and  # Daily 8-hour limit
+                    weekly_member_hours[member_id] < 40  # Weekly 40-hour limit
+                )
+                
+                if can_assign:
+                    # Assign member to this hour
+                    timeslot.assigned_member_id = member_id
+                    timeslot.save()
+                    
+                    # Update tracking
+                    daily_member_hours[member_id] += 1
+                    weekly_member_hours[member_id] += 1
+                    
+                    assigned = True
+                
+                member_index = (member_index + 1) % len(active_members)
+                attempts += 1
+            
+            # If no member could be assigned, assign to the first available member (emergency)
+            if not assigned:
+                member_id = active_members[0]
+                timeslot.assigned_member_id = member_id
+                timeslot.save()
+                print(f"WARNING: Emergency assignment for {timeslot.start_datetime} - member {member_id}")
+
+
+def has_sufficient_break(member_id, current_time, day_timeslots, min_break_hours):
+    """Check if member had sufficient break since last assignment."""
+    # Find the last timeslot assigned to this member on the same day
+    last_assignment = None
+    for timeslot in day_timeslots:
+        if (timeslot.assigned_member_id == member_id and 
+            timeslot.start_datetime < current_time):
+            if last_assignment is None or timeslot.start_datetime > last_assignment.start_datetime:
+                last_assignment = timeslot
+    
+    if last_assignment is None:
+        return True  # No previous assignment today
+    
+    # Check if enough time has passed
+    time_since_last = current_time - last_assignment.end_datetime
+    return time_since_last >= timedelta(hours=min_break_hours)
+
+
+@shared_task
+def regenerate_schedules_for_team(team_id, from_date=None):
+    """
+    Regenerate schedules for a team from a specific date onwards.
+    This is called when team membership changes.
+    """
+    from .models import Schedule, TeamScheduleConfig
+    from hirethon_template.manager_dashboard.models import Team
+    
+    try:
+        team = Team.objects.get(id=team_id)
+        config = team.schedule_config
+        
+        # If no from_date provided, start from tomorrow
+        if from_date is None:
+            from_date = timezone.now().date() + timedelta(days=1)
+        
+        print(f"Regenerating schedules for team {team.team_name} from {from_date}")
+        
+        # Get all schedules from the specified date onwards
+        schedules_to_update = Schedule.objects.filter(
+            team=team,
+            week_start_date__gte=from_date
+        ).order_by('week_start_date')
+        
+        print(f"Found {schedules_to_update.count()} schedules to update")
+        
+        updated_schedules = []
+        
+        for schedule in schedules_to_update:
+            print(f"Processing schedule {schedule.id} for week {schedule.week_start_date}")
+            
+            # Get count before deletion
+            old_timeslots_count = schedule.timeslots.count()
+            print(f"  Deleting {old_timeslots_count} existing timeslots")
+            
+            # Clear existing timeslots
+            schedule.timeslots.all().delete()
+            
+            # Regenerate timeslots with new member assignments
+            print(f"  Generating new timeslots...")
+            generate_timeslots(schedule, config)
+            
+            # Validate the updated schedule
+            validate_schedule(schedule)
+            
+            new_timeslots_count = schedule.timeslots.count()
+            assigned_count = schedule.timeslots.filter(assigned_member__isnull=False).count()
+            
+            print(f"  Generated {new_timeslots_count} timeslots, {assigned_count} assigned")
+            
+            updated_schedules.append({
+                'schedule_id': schedule.id,
+                'week_start': schedule.week_start_date,
+                'timeslots_count': new_timeslots_count,
+                'assigned_count': assigned_count
+            })
+        
+        print(f"Successfully updated {len(updated_schedules)} schedules")
+        
+        return {
+            'team_name': team.team_name,
+            'updated_schedules': updated_schedules,
+            'from_date': from_date
+        }
+        
+    except Team.DoesNotExist:
+        return {'error': f'Team with ID {team_id} not found'}
+    except Exception as e:
+        print(f"Error regenerating schedules: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {'error': f'Failed to regenerate schedules: {str(e)}'}
+
+
+@shared_task
+def cleanup_duplicate_timeslots(team_id=None):
+    """
+    Clean up duplicate timeslots for a team or all teams.
+    This is a utility function to fix existing duplicate data.
+    """
+    from .models import Schedule, Timeslot
+    from hirethon_template.manager_dashboard.models import Team
+    
+    try:
+        if team_id:
+            teams = Team.objects.filter(id=team_id)
+        else:
+            teams = Team.objects.filter(is_active=True)
+        
+        total_duplicates_removed = 0
+        
+        for team in teams:
+            print(f"Cleaning up duplicates for team {team.team_name}")
+            
+            for schedule in team.schedules.all():
+                # Get all timeslots for this schedule
+                timeslots = schedule.timeslots.all().order_by('start_datetime')
+                
+                # Track seen time ranges
+                seen_ranges = set()
+                duplicates_to_remove = []
+                
+                for timeslot in timeslots:
+                    time_range = f"{timeslot.start_datetime} - {timeslot.end_datetime}"
+                    
+                    if time_range in seen_ranges:
+                        # This is a duplicate
+                        duplicates_to_remove.append(timeslot.id)
+                        print(f"  Found duplicate: {time_range}")
+                    else:
+                        seen_ranges.add(time_range)
+                
+                # Remove duplicates
+                if duplicates_to_remove:
+                    Timeslot.objects.filter(id__in=duplicates_to_remove).delete()
+                    total_duplicates_removed += len(duplicates_to_remove)
+                    print(f"  Removed {len(duplicates_to_remove)} duplicate timeslots from schedule {schedule.id}")
+        
+        return {
+            'total_duplicates_removed': total_duplicates_removed,
+            'teams_processed': teams.count()
+        }
+        
+    except Exception as e:
+        print(f"Error cleaning up duplicates: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {'error': f'Failed to cleanup duplicates: {str(e)}'}
+
+
+@shared_task
+def check_and_start_auto_scheduling(team_id):
+    """
+    Check if team has reached 5 members and start auto-scheduling if needed.
+    This is called when a new member joins a team.
+    """
+    from hirethon_template.manager_dashboard.models import Team
+    
+    try:
+        team = Team.objects.get(id=team_id)
+        member_count = team.members.filter(is_active=True).count()
+        
+        print(f"Team {team.team_name} now has {member_count} members")
+        
+        # Check if team has reached the minimum required members (5)
+        if member_count >= 5:
+            print(f"Team {team.team_name} has reached {member_count} members. Starting auto-scheduling...")
+            
+            # Generate schedule for next week
+            result = generate_weekly_schedules()
+            
+            # Also regenerate any existing schedules from tomorrow onwards
+            regenerate_result = regenerate_schedules_for_team(team_id)
+            
+            return {
+                'team_name': team.team_name,
+                'member_count': member_count,
+                'auto_scheduling_started': True,
+                'weekly_generation': result,
+                'regeneration': regenerate_result
+            }
+        else:
+            return {
+                'team_name': team.team_name,
+                'member_count': member_count,
+                'auto_scheduling_started': False,
+                'message': f'Team needs {5 - member_count} more members to start auto-scheduling'
+            }
+            
+    except Team.DoesNotExist:
+        return {'error': f'Team with ID {team_id} not found'}
+    except Exception as e:
+        return {'error': f'Failed to check auto-scheduling: {str(e)}'}
 
 
 def assign_members_to_timeslots(schedule, timeslots):

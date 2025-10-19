@@ -274,22 +274,25 @@ def calculate_required_members(config):
 
 
 def generate_timeslots(schedule, config):
-    """Generate timeslots for a schedule based on configuration."""
+    """Generate timeslots for 24/7 coverage with 8-hour max per member per day."""
     week_start = schedule.week_start_date
-    timeslot_duration = timedelta(hours=config.timeslot_duration_hours)
-    min_break = timedelta(hours=config.min_break_hours)
+    max_slot_duration = config.timeslot_duration_hours  # Maximum hours per slot
+    min_break_hours = config.min_break_hours
     
-    # Generate timeslots for the entire week (7 days) with 24/7 coverage
+    # Generate hourly timeslots for 24/7 coverage (168 hours total)
     current_datetime = timezone.make_aware(
         datetime.combine(week_start, datetime.min.time())
     )
     week_end = current_datetime + timedelta(days=7)
     
     timeslots = []
+    hour_count = 0
+    
+    # Generate 1-hour timeslots for the entire week
     while current_datetime < week_end:
-        end_datetime = current_datetime + timeslot_duration
+        end_datetime = current_datetime + timedelta(hours=1)
         
-        # Create timeslot
+        # Create hourly timeslot
         timeslot = Timeslot.objects.create(
             schedule=schedule,
             start_datetime=current_datetime,
@@ -298,11 +301,92 @@ def generate_timeslots(schedule, config):
         )
         timeslots.append(timeslot)
         
-        # Move to next timeslot immediately (no gap for 24/7 coverage)
         current_datetime = end_datetime
+        hour_count += 1
     
-    # Assign members to timeslots using round-robin
-    assign_members_to_timeslots(schedule, timeslots)
+    # Group timeslots by day for member assignment
+    daily_timeslots = {}
+    for timeslot in timeslots:
+        day = timeslot.start_datetime.date()
+        if day not in daily_timeslots:
+            daily_timeslots[day] = []
+        daily_timeslots[day].append(timeslot)
+    
+    # Assign members to timeslots with 8-hour daily limit
+    assign_members_with_daily_limits(schedule, daily_timeslots, max_slot_duration, min_break_hours)
+
+
+def assign_members_with_daily_limits(schedule, daily_timeslots, max_slot_duration, min_break_hours):
+    """Assign members to timeslots ensuring 24/7 coverage with 8-hour daily limits."""
+    team = schedule.team
+    active_members = list(team.members.filter(is_active=True).values_list('member', flat=True))
+    
+    if not active_members:
+        return
+    
+    # Process each day separately
+    for day, day_timeslots in daily_timeslots.items():
+        # Track daily hours for each member
+        daily_member_hours = {member_id: 0 for member_id in active_members}
+        weekly_member_hours = {member_id: 0 for member_id in active_members}  # Track weekly hours
+        
+        # Sort timeslots by start time
+        day_timeslots.sort(key=lambda x: x.start_datetime)
+        
+        # Assign members to each hour of the day
+        member_index = 0
+        for timeslot in day_timeslots:
+            # Find next available member for this hour
+            attempts = 0
+            assigned = False
+            
+            while attempts < len(active_members) and not assigned:
+                member_id = active_members[member_index]
+                
+                # Check constraints
+                can_assign = (
+                    daily_member_hours[member_id] < 8 and  # Daily 8-hour limit
+                    weekly_member_hours[member_id] < 40  # Weekly 40-hour limit
+                )
+                
+                if can_assign:
+                    # Assign member to this hour
+                    timeslot.assigned_member_id = member_id
+                    timeslot.save()
+                    
+                    # Update tracking
+                    daily_member_hours[member_id] += 1
+                    weekly_member_hours[member_id] += 1
+                    
+                    assigned = True
+                
+                member_index = (member_index + 1) % len(active_members)
+                attempts += 1
+            
+            # If no member could be assigned, assign to the first available member (emergency)
+            if not assigned:
+                member_id = active_members[0]
+                timeslot.assigned_member_id = member_id
+                timeslot.save()
+                print(f"WARNING: Emergency assignment for {timeslot.start_datetime} - member {member_id}")
+
+
+def has_sufficient_break(member_id, current_time, day_timeslots, min_break_hours):
+    """Check if member had sufficient break since last assignment."""
+    # Find the last timeslot assigned to this member on the same day
+    last_assignment = None
+    for timeslot in day_timeslots:
+        if (timeslot.assigned_member_id == member_id and 
+            timeslot.start_datetime < current_time):
+            if last_assignment is None or timeslot.start_datetime > last_assignment.start_datetime:
+                last_assignment = timeslot
+    
+    if last_assignment is None:
+        return True  # No previous assignment today
+    
+    # Check if enough time has passed
+    time_since_last = current_time - last_assignment.end_datetime
+    return time_since_last >= timedelta(hours=min_break_hours)
 
 
 def assign_members_to_timeslots(schedule, timeslots):
@@ -753,6 +837,146 @@ def get_team_schedule_for_swapping(request, team_id):
                 {"error": "No schedule found for this team"}, 
                 status=status.HTTP_404_NOT_FOUND
             )
+    except Exception as e:
+        return Response(
+            {"error": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def regenerate_team_schedules(request, team_id):
+    """Manually regenerate schedules for a team from a specific date onwards."""
+    try:
+        team = Team.objects.get(id=team_id)
+        
+        # Get from_date from request or default to tomorrow
+        from_date_str = request.data.get('from_date')
+        if from_date_str:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
+        else:
+            from_date = timezone.now().date() + timedelta(days=1)
+        
+        # Trigger the regeneration task
+        from .tasks import regenerate_schedules_for_team
+        result = regenerate_schedules_for_team.delay(team_id, from_date)
+        
+        return Response({
+            'message': 'Schedule regeneration task queued',
+            'task_id': result.id,
+            'team_name': team.team_name,
+            'from_date': from_date
+        }, status=status.HTTP_202_ACCEPTED)
+        
+    except Team.DoesNotExist:
+        return Response(
+            {"error": "Team not found"}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {"error": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def check_team_auto_scheduling(request, team_id):
+    """Check if team should start auto-scheduling and trigger if needed."""
+    try:
+        team = Team.objects.get(id=team_id)
+        
+        # Trigger the check task
+        from .tasks import check_and_start_auto_scheduling
+        result = check_and_start_auto_scheduling.delay(team_id)
+        
+        return Response({
+            'message': 'Auto-scheduling check task queued',
+            'task_id': result.id,
+            'team_name': team.team_name
+        }, status=status.HTTP_202_ACCEPTED)
+        
+    except Team.DoesNotExist:
+        return Response(
+            {"error": "Team not found"}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {"error": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsManagerOrAdmin])
+def team_member_status(request, team_id):
+    """Get team member status and scheduling readiness."""
+    try:
+        team = Team.objects.get(id=team_id)
+        member_count = team.members.filter(is_active=True).count()
+        required_members = 5  # Minimum required for scheduling
+        
+        # Check if team has any schedules
+        has_schedules = Schedule.objects.filter(team=team).exists()
+        
+        # Get current week's schedule if exists
+        today = timezone.now().date()
+        days_since_monday = today.weekday()
+        current_week_monday = today - timedelta(days=days_since_monday)
+        
+        current_schedule = None
+        try:
+            current_schedule = Schedule.objects.get(
+                team=team,
+                week_start_date=current_week_monday
+            )
+        except Schedule.DoesNotExist:
+            pass
+        
+        return Response({
+            'team_name': team.team_name,
+            'member_count': member_count,
+            'required_members': required_members,
+            'can_schedule': member_count >= required_members,
+            'has_schedules': has_schedules,
+            'current_schedule': {
+                'exists': current_schedule is not None,
+                'timeslots_count': current_schedule.timeslots.count() if current_schedule else 0,
+                'assigned_count': current_schedule.timeslots.filter(assigned_member__isnull=False).count() if current_schedule else 0
+            } if current_schedule else None
+        })
+        
+    except Team.DoesNotExist:
+        return Response(
+            {"error": "Team not found"}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {"error": str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def cleanup_duplicate_timeslots(request, team_id=None):
+    """Clean up duplicate timeslots for a team."""
+    try:
+        from .tasks import cleanup_duplicate_timeslots
+        
+        # Trigger the cleanup task
+        result = cleanup_duplicate_timeslots.delay(team_id)
+        
+        return Response({
+            'message': 'Duplicate cleanup task queued',
+            'task_id': result.id,
+            'team_id': team_id
+        }, status=status.HTTP_202_ACCEPTED)
+        
     except Exception as e:
         return Response(
             {"error": str(e)}, 

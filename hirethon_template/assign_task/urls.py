@@ -4,7 +4,8 @@ from .api.views import (
     generate_schedule, team_schedules, schedule_detail, publish_schedule,
     validate_schedule_endpoint, trigger_automatic_scheduling, scheduling_status,
     create_swap_request, get_swap_requests, accept_swap_request, reject_swap_request,
-    get_team_schedule_for_swapping
+    get_team_schedule_for_swapping, regenerate_team_schedules, check_team_auto_scheduling,
+    team_member_status, cleanup_duplicate_timeslots
 )
 
 app_name = 'assign_task'
@@ -27,6 +28,12 @@ urlpatterns = [
     # Automatic scheduling
     path('auto/trigger/', trigger_automatic_scheduling, name='trigger_automatic_scheduling'),
     path('auto/status/', scheduling_status, name='scheduling_status'),
+    
+    # Team member management and schedule regeneration
+    path('team/<int:team_id>/regenerate/', regenerate_team_schedules, name='regenerate_team_schedules'),
+    path('team/<int:team_id>/check-auto-scheduling/', check_team_auto_scheduling, name='check_team_auto_scheduling'),
+    path('team/<int:team_id>/member-status/', team_member_status, name='team_member_status'),
+    path('team/<int:team_id>/cleanup-duplicates/', cleanup_duplicate_timeslots, name='cleanup_duplicate_timeslots'),
     
     # Swap requests
     path('swap/request/', create_swap_request, name='create_swap_request'),
