@@ -22,12 +22,7 @@ export const organizationService = {
    */
   create: (data) => api.post('/admin/organizations/', data),
 
-  /**
-   * Get organization by ID
-   * @param {number} id - Organization ID
-   * @returns {Promise} API response with organization data
-   */
-  getById: (id) => api.get(`/admin/organizations/${id}/`),
+  // Removed unused endpoint: getById
 
   /**
    * Update organization
@@ -69,12 +64,7 @@ export const managerService = {
    */
   register: (data) => api.post('/auth/register/manager/', data),
 
-  /**
-   * Get manager by ID
-   * @param {number} id - Manager ID
-   * @returns {Promise} API response with manager data
-   */
-  getById: (id) => api.get(`/admin/managers/${id}/`),
+  // Removed unused endpoint: getById
 
   /**
    * Update manager
@@ -95,26 +85,12 @@ export const managerService = {
   delete: (id) => api.delete(`/admin/managers/${id}/`),
 };
 
-// Dashboard Statistics
-export const dashboardService = {
-  /**
-   * Get dashboard overview data
-   * @returns {Promise} API response with dashboard data
-   */
-  getOverview: () => api.get('/admin/dashboard/'),
-
-  /**
-   * Get dashboard statistics
-   * @returns {Promise} API response with dashboard statistics
-   */
-  getStats: () => api.get('/admin/dashboard/stats/'),
-};
+// Removed unused dashboardService - not used anywhere in the codebase
 
 // Combined admin service object for easy importing
 const adminService = {
   organizations: organizationService,
   managers: managerService,
-  dashboard: dashboardService,
 };
 
 export default adminService;

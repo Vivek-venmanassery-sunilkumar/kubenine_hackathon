@@ -179,7 +179,7 @@ def generate_timeslots(schedule, config):
     timeslot_duration = timedelta(hours=config.timeslot_duration_hours)
     min_break = timedelta(hours=config.min_break_hours)
     
-    # Generate timeslots for the entire week (7 days)
+    # Generate timeslots for the entire week (7 days) with 24/7 coverage
     current_datetime = timezone.make_aware(
         datetime.combine(week_start, datetime.min.time())
     )
@@ -198,16 +198,16 @@ def generate_timeslots(schedule, config):
         )
         timeslots.append(timeslot)
         
-        # Move to next timeslot with minimum break
-        current_datetime = end_datetime + min_break
+        # Move to next timeslot immediately (no gap for 24/7 coverage)
+        current_datetime = end_datetime
     
     # Assign members to timeslots using round-robin
     assign_members_to_timeslots(schedule, timeslots)
 
 
 def assign_members_to_timeslots(schedule, timeslots):
-    """Assign team members to timeslots using round-robin algorithm."""
-    from .models import Timeslot
+    """Assign team members to timeslots using round-robin algorithm with rolling weekly tracking."""
+    from .models import Timeslot, MemberWeeklyHours
     
     team = schedule.team
     active_members = list(team.members.filter(is_active=True).values_list('member', flat=True))
@@ -215,10 +215,28 @@ def assign_members_to_timeslots(schedule, timeslots):
     if not active_members:
         return
     
+    # Get week start date (Monday)
+    week_start = schedule.week_start_date
+    
     # Track member hours for constraint checking
     member_hours = {member_id: 0 for member_id in active_members}
-    max_daily_hours = 8
-    max_weekly_hours = 40
+    max_daily_hours = 8  # Fixed constraint
+    
+    # Get or create weekly hour records for all members
+    weekly_records = {}
+    for member_id in active_members:
+        weekly_record, created = MemberWeeklyHours.objects.get_or_create(
+            member_id=member_id,
+            team=team,
+            week_start_date=week_start,
+            defaults={
+                'base_weekly_limit': 40,
+                'adjusted_weekly_limit': 40,
+                'scheduled_hours': 0,
+                'actual_hours': 0
+            }
+        )
+        weekly_records[member_id] = weekly_record
     
     member_index = 0
     for timeslot in timeslots:
@@ -229,16 +247,41 @@ def assign_members_to_timeslots(schedule, timeslots):
         attempts = 0
         while attempts < len(active_members):
             member_id = active_members[member_index]
+            weekly_record = weekly_records[member_id]
             
             # Check if member can take this timeslot
             timeslot_hours = timeslot.duration_hours
-            if (member_hours[member_id] + timeslot_hours <= max_weekly_hours):
-                # Check daily hours constraint
-                member_daily_hours = get_member_daily_hours(member_id, timeslot.start_datetime.date())
-                if member_daily_hours + timeslot_hours <= max_daily_hours:
+            
+            # Check daily hours constraint (always enforced)
+            member_daily_hours = get_member_daily_hours(member_id, timeslot.start_datetime.date())
+            if member_daily_hours + timeslot_hours <= max_daily_hours:
+                # Check weekly hours constraint (flexible with overage tracking)
+                current_weekly_hours = member_hours[member_id]
+                
+                # Allow assignment if:
+                # 1. Within adjusted weekly limit, OR
+                # 2. Weekend scheduling (Saturday/Sunday) and no other options
+                is_weekend = timeslot.start_datetime.weekday() >= 5  # Saturday=5, Sunday=6
+                within_weekly_limit = current_weekly_hours + timeslot_hours <= weekly_record.adjusted_weekly_limit
+                
+                # Weekend override: allow up to 8 hours over the base limit on weekends
+                is_weekend_override = is_weekend and current_weekly_hours + timeslot_hours <= weekly_record.base_weekly_limit + 8
+                
+                # Emergency override: if no one else can take the slot and it's critical
+                is_emergency_override = current_weekly_hours + timeslot_hours <= weekly_record.base_weekly_limit + 12  # Max 12 hours overage
+                
+                if within_weekly_limit or is_weekend_override or is_emergency_override:
                     timeslot.assigned_member_id = member_id
                     timeslot.save()
                     member_hours[member_id] += timeslot_hours
+                    
+                    # Update weekly record
+                    weekly_record.scheduled_hours += timeslot_hours
+                    weekly_record.actual_hours += timeslot_hours
+                    if is_weekend_override and not within_weekly_limit:
+                        weekly_record.is_weekend_override = True
+                        weekly_record.notes = f"Weekend scheduling required {timeslot_hours}h overage"
+                    weekly_record.save()
                     break
             
             member_index = (member_index + 1) % len(active_members)
@@ -265,8 +308,8 @@ def get_member_daily_hours(member_id, date):
 
 
 def validate_schedule(schedule):
-    """Validate a schedule and create validation record."""
-    from .models import ScheduleValidation
+    """Validate a schedule and create validation record with flexible weekly limits."""
+    from .models import ScheduleValidation, MemberWeeklyHours
     
     validation, created = ScheduleValidation.objects.get_or_create(schedule=schedule)
     
@@ -282,7 +325,7 @@ def validate_schedule(schedule):
     if unassigned_timeslots > 0:
         errors.append(f"{unassigned_timeslots} timeslots are unassigned")
     
-    # Check member hour constraints
+    # Check member hour constraints with flexible weekly limits
     for member in schedule.team.members.filter(is_active=True):
         member_timeslots = schedule.timeslots.filter(
             assigned_member=member.member,
@@ -290,17 +333,38 @@ def validate_schedule(schedule):
         )
         
         total_hours = sum(ts.duration_hours for ts in member_timeslots)
-        if total_hours > 40:
-            errors.append(f"Member {member.member.name} exceeds 40 hours per week ({total_hours}h)")
         
-        # Check daily hours
+        # Get weekly record for this member
+        weekly_record = MemberWeeklyHours.objects.filter(
+            member=member.member,
+            team=schedule.team,
+            week_start_date=schedule.week_start_date
+        ).first()
+        
+        if weekly_record:
+            # Check against adjusted weekly limit
+            if total_hours > weekly_record.adjusted_weekly_limit:
+                if weekly_record.is_weekend_override:
+                    warnings.append(f"Member {member.member.name} has weekend override: {total_hours}h (limit: {weekly_record.adjusted_weekly_limit}h)")
+                else:
+                    errors.append(f"Member {member.member.name} exceeds adjusted weekly limit: {total_hours}h (limit: {weekly_record.adjusted_weekly_limit}h)")
+            
+            # Check for significant overage (more than 8 hours over base limit)
+            if total_hours > weekly_record.base_weekly_limit + 8:
+                errors.append(f"Member {member.member.name} has excessive overage: {total_hours}h (base limit: {weekly_record.base_weekly_limit}h)")
+        else:
+            # Fallback to base limit if no weekly record
+            if total_hours > 40:
+                errors.append(f"Member {member.member.name} exceeds base weekly limit: {total_hours}h (limit: 40h)")
+        
+        # Check daily hours (always enforced)
         daily_hours = {}
         for ts in member_timeslots:
             date = ts.start_datetime.date()
             daily_hours[date] = daily_hours.get(date, 0) + ts.duration_hours
         
         for date, hours in daily_hours.items():
-            if hours > 8:
+            if hours > 8:  # Fixed constraint
                 errors.append(f"Member {member.member.name} exceeds 8 hours on {date} ({hours}h)")
     
     # Check if team has sufficient members

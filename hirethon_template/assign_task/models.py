@@ -22,13 +22,13 @@ class TeamScheduleConfig(models.Model):
     timeslot_duration_hours = models.PositiveIntegerField(
         _("Timeslot Duration (hours)"),
         default=4,
-        help_text=_("Duration of each timeslot in hours (max 8)")
+        help_text=_("Duration of each timeslot in hours (1-8, integer values only)")
     )
     
     min_break_hours = models.PositiveIntegerField(
         _("Minimum Break (hours)"),
         default=12,
-        help_text=_("Minimum break between shifts in hours")
+        help_text=_("Minimum break between shifts in hours (not used for 24/7 coverage)")
     )
     
     # Fixed system constraints (hardcoded)
@@ -67,6 +67,8 @@ class TeamScheduleConfig(models.Model):
             raise ValidationError(f"Timeslot duration cannot exceed {self.MAX_TIMESLOT_DURATION} hours")
         if self.timeslot_duration_hours <= 0:
             raise ValidationError("Timeslot duration must be positive")
+        if self.timeslot_duration_hours < 1:
+            raise ValidationError("Timeslot duration must be at least 1 hour")
         
         if self.min_break_hours <= 0:
             raise ValidationError("Minimum break hours must be positive")
@@ -239,6 +241,186 @@ class ScheduleValidation(models.Model):
     
     def __str__(self):
         return f"Validation for {self.schedule} - {'Valid' if self.is_valid else 'Invalid'}"
+
+
+class MemberWeeklyHours(models.Model):
+    """Track weekly hours for each member with overage compensation."""
+    
+    member = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='weekly_hours',
+        help_text=_("Member this record belongs to")
+    )
+    
+    team = models.ForeignKey(
+        Team,
+        on_delete=models.CASCADE,
+        related_name='member_weekly_hours',
+        help_text=_("Team this record belongs to")
+    )
+    
+    week_start_date = models.DateField(
+        _("Week Start Date"),
+        help_text=_("Monday of the week this record represents")
+    )
+    
+    scheduled_hours = models.DecimalField(
+        _("Scheduled Hours"),
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text=_("Hours scheduled for this week")
+    )
+    
+    actual_hours = models.DecimalField(
+        _("Actual Hours"),
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text=_("Hours actually worked this week")
+    )
+    
+    base_weekly_limit = models.DecimalField(
+        _("Base Weekly Limit"),
+        max_digits=5,
+        decimal_places=2,
+        default=40,
+        help_text=_("Standard weekly hour limit (40 hours)")
+    )
+    
+    adjusted_weekly_limit = models.DecimalField(
+        _("Adjusted Weekly Limit"),
+        max_digits=5,
+        decimal_places=2,
+        default=40,
+        help_text=_("Adjusted limit considering previous overages")
+    )
+    
+    overage_hours = models.DecimalField(
+        _("Overage Hours"),
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text=_("Hours worked beyond the base limit (positive = overage, negative = underage)")
+    )
+    
+    cumulative_overage = models.DecimalField(
+        _("Cumulative Overage"),
+        max_digits=8,
+        decimal_places=2,
+        default=0,
+        help_text=_("Running total of overage hours across all weeks")
+    )
+    
+    is_weekend_override = models.BooleanField(
+        _("Weekend Override"),
+        default=False,
+        help_text=_("Whether this week exceeded limits due to weekend scheduling requirements")
+    )
+    
+    notes = models.TextField(
+        _("Notes"),
+        blank=True,
+        help_text=_("Additional notes about this week's scheduling")
+    )
+    
+    created_at = models.DateTimeField(
+        _("Created At"),
+        auto_now_add=True,
+        help_text=_("When this record was created")
+    )
+    
+    updated_at = models.DateTimeField(
+        _("Updated At"),
+        auto_now=True,
+        help_text=_("When this record was last updated")
+    )
+    
+    class Meta:
+        verbose_name = _("Member Weekly Hours")
+        verbose_name_plural = _("Member Weekly Hours")
+        unique_together = ['member', 'team', 'week_start_date']
+        ordering = ['-week_start_date', 'member__name']
+    
+    def __str__(self):
+        return f"{self.member.name} - Week {self.week_start_date} ({self.actual_hours}h)"
+    
+    def save(self, *args, **kwargs):
+        """Calculate overage and cumulative overage on save."""
+        # Calculate overage for this week
+        self.overage_hours = self.actual_hours - self.base_weekly_limit
+        
+        # Get previous week's cumulative overage
+        previous_week = MemberWeeklyHours.objects.filter(
+            member=self.member,
+            team=self.team,
+            week_start_date__lt=self.week_start_date
+        ).order_by('-week_start_date').first()
+        
+        if previous_week:
+            self.cumulative_overage = previous_week.cumulative_overage + self.overage_hours
+        else:
+            self.cumulative_overage = self.overage_hours
+        
+        super().save(*args, **kwargs)
+        
+        # After saving, recalculate all future weeks' cumulative overage
+        self._recalculate_future_cumulative_overage()
+        
+        # Then adjust future weeks' limits based on current cumulative overage
+        self._adjust_future_weeks()
+    
+    def _recalculate_future_cumulative_overage(self):
+        """Recalculate cumulative overage for all future weeks after this one."""
+        future_weeks = MemberWeeklyHours.objects.filter(
+            member=self.member,
+            team=self.team,
+            week_start_date__gt=self.week_start_date
+        ).order_by('week_start_date')
+        
+        # Start with this week's cumulative overage
+        running_cumulative = self.cumulative_overage
+        
+        for future_week in future_weeks:
+            # Recalculate this future week's cumulative overage
+            future_week.cumulative_overage = running_cumulative + future_week.overage_hours
+            running_cumulative = future_week.cumulative_overage
+            future_week.save(update_fields=['cumulative_overage'])
+    
+    def _adjust_future_weeks(self):
+        """Adjust future weeks' limits based on current cumulative overage."""
+        future_weeks = MemberWeeklyHours.objects.filter(
+            member=self.member,
+            team=self.team,
+            week_start_date__gt=self.week_start_date
+        ).order_by('week_start_date')
+        
+        if not future_weeks.exists():
+            return
+        
+        # Handle both positive and negative cumulative overage
+        remaining_adjustment = self.cumulative_overage
+        
+        for future_week in future_weeks:
+            if remaining_adjustment == 0:
+                break
+            
+            if remaining_adjustment > 0:
+                # Positive overage: reduce future weeks
+                reduction = min(remaining_adjustment, future_week.base_weekly_limit)
+                future_week.adjusted_weekly_limit = future_week.base_weekly_limit - reduction
+                remaining_adjustment -= reduction
+                
+            else:
+                # Negative overage (underage): increase future weeks
+                # But cap at reasonable maximum (e.g., 48 hours max per week)
+                max_weekly_hours = 48
+                increase = min(abs(remaining_adjustment), max_weekly_hours - future_week.base_weekly_limit)
+                future_week.adjusted_weekly_limit = future_week.base_weekly_limit + increase
+                remaining_adjustment += increase
+            
+            future_week.save(update_fields=['adjusted_weekly_limit'])
 
 
 class SwapRequest(models.Model):

@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { logout } from '../store/authSlice';
 import authService from '../services/authService';
 import managerService from '../services/managerService';
+import memberService from '../services/memberService';
 import { getErrorMessage } from '../utils/errorHandler';
 
 const ManagerDashboard = () => {
@@ -28,6 +29,7 @@ const ManagerDashboard = () => {
   const [selectedTeamForSchedule, setSelectedTeamForSchedule] = useState('');
   const [teamSchedules, setTeamSchedules] = useState({});
   const [teamScheduleStatus, setTeamScheduleStatus] = useState({});
+  const [teamScheduleByDate, setTeamScheduleByDate] = useState({});
 
   // Helper function to check if an email has been accepted for a team
   const isEmailAccepted = (email, teamId) => {
@@ -60,6 +62,76 @@ const ManagerDashboard = () => {
       (member.member_email || member.email || '').toLowerCase() === email.toLowerCase()
     );
     return member ? member.team_name : 'another team';
+  };
+
+  // Helper functions for schedule display (same as MemberDashboard)
+  const getNext7Days = () => {
+    const days = [];
+    const today = new Date();
+    
+    // Get the start of the current week (Sunday)
+    const startOfWeek = new Date(today);
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    startOfWeek.setDate(today.getDate() - dayOfWeek);
+    
+    // Generate 7 days starting from the start of the current week
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(startOfWeek);
+      date.setDate(startOfWeek.getDate() + i);
+      days.push(date.toISOString().split('T')[0]);
+    }
+    return days;
+  };
+
+  const getSlotsForDate = (date, teamId) => {
+    return teamScheduleByDate[teamId]?.[date] || [];
+  };
+
+  const formatDate = (date) => {
+    return new Date(date).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const formatTime = (datetime) => {
+    return new Date(datetime).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
+  const getMemberName = (slot) => {
+    // Use the new API fields if available
+    if (slot.assigned_member_name) {
+      return slot.assigned_member_name;
+    }
+    
+    // Fallback to old logic if new fields not available
+    if (slot.assigned_member) {
+      // If assigned_member is an object with name property
+      if (typeof slot.assigned_member === 'object' && slot.assigned_member.name) {
+        return slot.assigned_member.name;
+      }
+      
+      // If assigned_member is an ID, look up in teamMembers
+      if (teamMembers && Array.isArray(teamMembers)) {
+        const member = teamMembers.find(m => 
+          m.member_id === slot.assigned_member || 
+          m.member === slot.assigned_member || 
+          m.id === slot.assigned_member
+        );
+        if (member) {
+          return member.member_name || member.name || `Member ${slot.assigned_member}`;
+        }
+      }
+      
+      return `Member ${slot.assigned_member}`;
+    }
+    
+    return 'Unassigned';
   };
 
   // Load data on component mount
@@ -157,13 +229,55 @@ const ManagerDashboard = () => {
         [teamId]: statusResponse.data
       }));
 
-      // Then load the schedules
-      const response = await managerService.schedule.getSchedules(teamId);
+      // Use manager-specific endpoints for better reliability
+      const [teamScheduleResponse, teamMembersResponse] = await Promise.all([
+        memberService.schedule.getManagerTeamSchedule(),
+        memberService.teamMembers.getManagerTeamMembers()
+      ]);
+
+      // Use the same data structure handling as MemberDashboard
+      const schedules = teamScheduleResponse.schedules || [];
+      const teamMembers = teamMembersResponse.members || [];
+      
       setTeamSchedules(prev => ({
         ...prev,
-        [teamId]: response.data
+        [teamId]: schedules
       }));
-      return response.data;
+      
+      // Process schedule data the same way as MemberDashboard
+      if (schedules.length > 0) {
+        const scheduleByDate = {};
+        
+        // Process ALL schedules, not just the first one
+        schedules.forEach(schedule => {
+          if (schedule.timeslots) {
+            schedule.timeslots.forEach(timeslot => {
+              const dateKey = new Date(timeslot.start_datetime).toISOString().split('T')[0];
+              if (!scheduleByDate[dateKey]) {
+                scheduleByDate[dateKey] = [];
+              }
+              scheduleByDate[dateKey].push(timeslot);
+            });
+          }
+        });
+        
+        setTeamScheduleByDate(prev => ({
+          ...prev,
+          [teamId]: scheduleByDate
+        }));
+      }
+      
+      // Update team members for this team
+      setTeamMembers(prev => {
+        const teamMembersForTeam = teamMembers.filter(member => 
+          member.team_id === teamId || member.team === teamId
+        );
+        return [...prev.filter(member => 
+          member.team_id !== teamId && member.team !== teamId
+        ), ...teamMembersForTeam];
+      });
+      
+      return schedules;
     } catch (error) {
       console.error(`Error loading schedule for team ${teamId}:`, error);
       toast.error('Failed to load team schedule');
@@ -348,7 +462,7 @@ const ManagerDashboard = () => {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  <span>Schedule</span>
+                  <span>Schedule for the Next 7 Days</span>
                 </div>
               </button>
             </div>
@@ -594,11 +708,11 @@ const ManagerDashboard = () => {
                   <form onSubmit={handleInviteMember} className="space-y-4">
                     <div className="flex gap-4">
                       <div className="flex-1">
-                        <input
-                          type="email"
-                          value={inviteEmail}
-                          onChange={(e) => setInviteEmail(e.target.value)}
-                          placeholder="Enter member email address"
+                      <input
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="Enter member email address"
                           className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
                             inviteEmail.trim() && isEmailTeamMember(inviteEmail.trim())
                               ? 'border-red-300 bg-red-50'
@@ -608,9 +722,9 @@ const ManagerDashboard = () => {
                               ? 'border-yellow-300 bg-yellow-50'
                               : 'border-gray-300'
                           }`}
-                          required
-                          disabled={loading}
-                        />
+                        required
+                        disabled={loading}
+                      />
                         {/* Status indicator */}
                         {inviteEmail.trim() && (
                           <div className="mt-2">
@@ -691,7 +805,7 @@ const ManagerDashboard = () => {
               <div className="space-y-6">
                 {/* Team Selection */}
                 <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-xl border border-purple-200">
-                  <h3 className="text-xl font-bold text-gray-900 mb-4">Select Team to View Schedule</h3>
+                  <h3 className="text-xl font-bold text-gray-900 mb-4">Select Team to View Schedule for the Next 7 Days</h3>
                   <div className="flex gap-4">
                     <select
                       value={selectedTeamForSchedule}
@@ -703,7 +817,7 @@ const ManagerDashboard = () => {
                       }}
                       className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     >
-                      <option value="">Choose a team to view their schedule</option>
+                      <option value="">Choose a team to view their schedule for the next 7 days</option>
                       {teams.map((team) => (
                         <option key={team.id} value={team.id}>
                           {team.team_name}
@@ -769,37 +883,24 @@ const ManagerDashboard = () => {
                               <svg className="w-12 h-12 text-blue-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                               </svg>
-                              <h4 className="text-lg font-semibold text-blue-800 mb-2">No Schedules Found</h4>
+                              <h4 className="text-lg font-semibold text-blue-800 mb-2">Schedule Loading</h4>
                               <p className="text-blue-700 mb-4">
-                                No schedules have been generated for <strong>{team.team_name}</strong> yet.
+                                The schedule for <strong>{team.team_name}</strong> is being automatically generated and will appear here shortly.
                               </p>
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    await managerService.schedule.generateSchedule(team.id);
-                                    toast.success('Schedule generation triggered!');
-                                    // Reload the schedule
-                                    await loadTeamSchedule(team.id);
-                                  } catch (error) {
-                                    console.error('Error generating schedule:', error);
-                                    toast.error('Failed to generate schedule');
-                                  }
-                                }}
-                                className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-medium"
-                              >
-                                Generate Schedule
-                              </button>
+                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
                             </div>
                           </div>
                         );
                       }
 
-                      // Calendar view for schedules
+                      // Calendar view for schedules - using same logic as MemberDashboard
+                      const next7Days = getNext7Days();
+                      
                       return (
                         <div>
                           <div className="flex items-center justify-between mb-6">
                             <h4 className="text-xl font-semibold text-gray-900">
-                              {team.team_name} - Schedule Calendar
+                              {team.team_name} - Schedule for the Next 7 Days
                             </h4>
                             <div className="flex space-x-2">
                               <span className={`px-3 py-1 rounded-full text-sm font-medium ${
@@ -812,72 +913,61 @@ const ManagerDashboard = () => {
                             </div>
                           </div>
 
-                          {/* 7-Day Calendar Grid */}
-                          <div className="grid grid-cols-7 gap-2 mb-6">
-                            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
-                              const today = new Date();
-                              const currentDate = new Date(today);
-                              currentDate.setDate(today.getDate() - today.getDay() + 1 + index); // Start from Monday
+                          {/* 7-Day Calendar Grid - exactly like MemberDashboard */}
+                          <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
+                            {next7Days.map((date) => {
+                              const slots = getSlotsForDate(date, selectedTeamForSchedule);
+                              const isToday = date === new Date().toISOString().split('T')[0];
                               
                               return (
-                                <div key={day} className="bg-gray-50 rounded-lg p-3 text-center">
-                                  <div className="text-sm font-medium text-gray-600">{day}</div>
-                                  <div className="text-lg font-semibold text-gray-900">
-                                    {currentDate.getDate()}
+                                <div
+                                  key={date}
+                                  className={`bg-white rounded-lg border-2 p-4 min-h-[200px] ${
+                                    isToday ? 'border-purple-400 bg-purple-50' : 'border-gray-200'
+                                  }`}
+                                >
+                                  <div className="text-center mb-3">
+                                    <h3 className="font-bold text-gray-900">{formatDate(date)}</h3>
+                                    {isToday && (
+                                      <span className="text-xs bg-purple-500 text-white px-2 py-1 rounded-full">
+                                        Today
+                                      </span>
+                                    )}
+                                  </div>
+                                  
+                                  <div className="space-y-2">
+                                    {slots.length === 0 ? (
+                                      <p className="text-gray-400 text-sm text-center py-4">No slots</p>
+                                    ) : (
+                                      slots.map((slot) => {
+                                        const memberName = getMemberName(slot);
+                                        
+                                        return (
+                                          <div
+                                            key={slot.id}
+                                            className={`p-2 rounded-lg text-xs ${
+                                              slot.assigned_member
+                                                ? 'bg-green-100 border border-green-300'
+                                                : 'bg-gray-100 border border-gray-300'
+                                            }`}
+                                          >
+                                            <div className="font-medium text-gray-900">
+                                              {formatTime(slot.start_datetime)} - {formatTime(slot.end_datetime)}
+                                            </div>
+                                            <div className="text-gray-600">
+                                              {slot.duration_hours}h
+                                            </div>
+                                            <div className="font-medium text-gray-600">
+                                              {memberName}
+                                            </div>
+                                          </div>
+                                        );
+                                      })
+                                    )}
                                   </div>
                                 </div>
                               );
                             })}
-                          </div>
-
-                          {/* Schedule Details */}
-                          <div className="space-y-4">
-                            {schedules.slice(0, 1).map((schedule) => (
-                              <div key={schedule.id} className="border border-gray-200 rounded-lg p-4">
-                                <div className="flex items-center justify-between mb-4">
-                                  <h5 className="text-lg font-semibold text-gray-900">
-                                    Week of {new Date(schedule.week_start_date).toLocaleDateString()}
-                                  </h5>
-                                  <div className="flex space-x-2">
-                                    <span className="text-sm text-gray-600">
-                                      {schedule.assigned_timeslots} / {schedule.total_timeslots} assigned
-                                    </span>
-                                  </div>
-                                </div>
-                                
-                                {/* Timeslots Grid */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                  {schedule.timeslots?.slice(0, 12).map((timeslot) => (
-                                    <div key={timeslot.id} className={`p-3 rounded-lg border ${
-                                      timeslot.assigned_member 
-                                        ? 'bg-green-50 border-green-200' 
-                                        : 'bg-gray-50 border-gray-200'
-                                    }`}>
-                                      <div className="text-sm font-medium text-gray-900">
-                                        {new Date(timeslot.start_datetime).toLocaleTimeString([], { 
-                                          hour: '2-digit', 
-                                          minute: '2-digit' 
-                                        })} - {new Date(timeslot.end_datetime).toLocaleTimeString([], { 
-                                          hour: '2-digit', 
-                                          minute: '2-digit' 
-                                        })}
-                                      </div>
-                                      <div className="text-xs text-gray-600 mt-1">
-                                        {timeslot.assigned_member ? timeslot.assigned_member_name : 'Unassigned'}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                                
-                                {schedule.timeslots?.length > 12 && (
-                                  <div className="text-center mt-4">
-                                    <button className="text-purple-600 hover:text-purple-800 text-sm font-medium">
-                                      View All {schedule.timeslots.length} Timeslots
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
                           </div>
                         </div>
                       );

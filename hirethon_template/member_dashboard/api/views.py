@@ -7,7 +7,8 @@ from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
 from hirethon_template.assign_task.models import Timeslot, Schedule, SwapRequest
-from hirethon_template.manager_dashboard.models import TeamMembers
+from hirethon_template.manager_dashboard.models import TeamMembers, Team
+from hirethon_template.authentication.models import Organization
 from hirethon_template.member_dashboard.api.serializers import (
     TimeslotSerializer, WeeklyScheduleSerializer, SwapRequestSerializer, 
     SwapRequestCreateSerializer, TeamMemberSerializer
@@ -17,6 +18,8 @@ from hirethon_template.utils.error_handling import (
     create_not_found_error_response, create_internal_error_response,
     create_unauthorized_error_response
 )
+from hirethon_template.authentication.api.permissions import IsMemberOrManager
+from hirethon_template.users.enums.role_choices import UserRole
 
 User = get_user_model()
 
@@ -24,26 +27,48 @@ User = get_user_model()
 class MemberScheduleViewSet(viewsets.ViewSet):
     """ViewSet for member schedule management."""
     
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsMemberOrManager]
     
     def get_queryset(self):
         """Get timeslots for the current user's teams."""
         user = self.request.user
         
-        # Get all teams the user is a member of
-        user_teams = TeamMembers.objects.filter(
-            member=user,
-            is_active=True
-        ).values_list('team', flat=True)
+        # Get teams based on user role
+        if user.role == UserRole.ADMIN:
+            # Admins can see all teams
+            user_teams = None  # Will be handled in the filter
+        elif user.role == UserRole.MANAGER:
+            # Managers can see teams from organizations they manage
+            manager_orgs = Organization.objects.filter(
+                manager=user,
+                is_active=True
+            ).values_list('id', flat=True)
+            user_teams = Team.objects.filter(
+                organization__in=manager_orgs,
+                is_active=True
+            ).values_list('id', flat=True)
+        else:
+            # Members can see teams they're members of
+            user_teams = TeamMembers.objects.filter(
+                member=user,
+                is_active=True
+            ).values_list('team', flat=True)
         
         # Get timeslots for the next 7 days
         today = timezone.now().date()
         next_week = today + timedelta(days=7)
         
+        # Build the filter based on user role
+        filter_kwargs = {
+            'start_datetime__date__gte': today,
+            'start_datetime__date__lt': next_week
+        }
+        
+        if user_teams is not None:
+            filter_kwargs['schedule__team__in'] = user_teams
+        
         return Timeslot.objects.filter(
-            schedule__team__in=user_teams,
-            start_datetime__date__gte=today,
-            start_datetime__date__lt=next_week
+            **filter_kwargs
         ).select_related(
             'schedule__team', 'assigned_member'
         ).order_by('start_datetime')
@@ -110,13 +135,29 @@ class MemberScheduleViewSet(viewsets.ViewSet):
         try:
             user = request.user
             
-            # Get user's teams
-            user_teams = TeamMembers.objects.filter(
-                member=user,
-                is_active=True
-            ).values_list('team', flat=True)
+            # Get user's teams based on role
+            if user.role == UserRole.ADMIN:
+                # Admins can see all teams
+                user_teams = None  # Will be handled in the filter
+            elif user.role == UserRole.MANAGER:
+                # Managers can see teams from organizations they manage
+                manager_orgs = Organization.objects.filter(
+                    manager=user,
+                    is_active=True
+                ).values_list('id', flat=True)
+                user_teams = Team.objects.filter(
+                    organization__in=manager_orgs,
+                    is_active=True
+                ).values_list('id', flat=True)
+            else:
+                # Members can see teams they're members of
+                user_teams = TeamMembers.objects.filter(
+                    member=user,
+                    is_active=True
+                ).values_list('team', flat=True)
             
-            if not user_teams.exists():
+            # Check if user has access to any teams
+            if user_teams is not None and not user_teams.exists():
                 return create_not_found_error_response(
                     "You are not a member of any team.",
                     {"teams": []}
@@ -126,11 +167,18 @@ class MemberScheduleViewSet(viewsets.ViewSet):
             today = timezone.now().date()
             next_week = today + timedelta(days=7)
             
+            # Build the filter based on user role
+            filter_kwargs = {
+                'week_start_date__lte': next_week,
+                'week_end_date__gte': today,
+                'status': 'published'
+            }
+            
+            if user_teams is not None:
+                filter_kwargs['team__in'] = user_teams
+            
             schedules = Schedule.objects.filter(
-                team__in=user_teams,
-                week_start_date__lte=next_week,
-                week_end_date__gte=today,
-                status='published'
+                **filter_kwargs
             ).select_related('team').prefetch_related('timeslots__assigned_member')
             
             serializer = WeeklyScheduleSerializer(schedules, many=True, context={'request': request})
@@ -145,12 +193,78 @@ class MemberScheduleViewSet(viewsets.ViewSet):
                 "Failed to retrieve team schedule. Please try again later.",
                 {"original_error": str(e)}
             )
+    
+    @action(detail=False, methods=['get'])
+    def manager_team_schedule(self, request):
+        """Get the full team schedule for managers - separate endpoint for better reliability."""
+        try:
+            user = request.user
+            
+            # Only allow managers and admins
+            if user.role not in [UserRole.MANAGER, UserRole.ADMIN]:
+                return create_unauthorized_error_response(
+                    "Only managers and admins can access this endpoint.",
+                    {}
+                )
+            
+            # Get manager's teams
+            if user.role == UserRole.ADMIN:
+                # Admins can see all teams
+                user_teams = None
+            else:
+                # Managers can see teams from organizations they manage
+                manager_orgs = Organization.objects.filter(
+                    manager=user,
+                    is_active=True
+                ).values_list('id', flat=True)
+                user_teams = Team.objects.filter(
+                    organization__in=manager_orgs,
+                    is_active=True
+                ).values_list('id', flat=True)
+            
+            # Check if manager has access to any teams
+            if user_teams is not None and not user_teams.exists():
+                return create_not_found_error_response(
+                    "You don't manage any teams.",
+                    {"teams": []}
+                )
+            
+            # Get schedules for the next 7 days
+            today = timezone.now().date()
+            next_week = today + timedelta(days=7)
+            
+            # Build the filter based on user role
+            filter_kwargs = {
+                'week_start_date__lte': next_week,
+                'week_end_date__gte': today,
+                'status': 'published'
+            }
+            
+            if user_teams is not None:
+                filter_kwargs['team__in'] = user_teams
+            
+            schedules = Schedule.objects.filter(
+                **filter_kwargs
+            ).select_related('team').prefetch_related('timeslots__assigned_member')
+            
+            serializer = WeeklyScheduleSerializer(schedules, many=True, context={'request': request})
+            
+            return create_success_response(
+                "Manager team schedule retrieved successfully.",
+                {"schedules": serializer.data}
+            )
+            
+        except Exception as e:
+            return create_internal_error_response(
+                "Failed to retrieve manager team schedule. Please try again later.",
+                {"original_error": str(e)}
+            )
 
 
 class SwapRequestViewSet(viewsets.ModelViewSet):
     """ViewSet for managing swap requests."""
     
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsMemberOrManager]
     serializer_class = SwapRequestSerializer
     
     def get_queryset(self):
@@ -322,18 +436,35 @@ class SwapRequestViewSet(viewsets.ModelViewSet):
 class TeamMemberViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for team member information."""
     
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsMemberOrManager]
     serializer_class = TeamMemberSerializer
     
     def get_queryset(self):
         """Get team members for the current user's teams."""
         user = self.request.user
         
-        # Get all teams the user is a member of
-        user_teams = TeamMembers.objects.filter(
-            member=user,
-            is_active=True
-        ).values_list('team', flat=True)
+        # Get teams based on user role
+        if user.role == UserRole.ADMIN:
+            # Admins can see all team members
+            return TeamMembers.objects.filter(
+                is_active=True
+            ).select_related('member').order_by('member__name')
+        elif user.role == UserRole.MANAGER:
+            # Managers can see members of teams from organizations they manage
+            manager_orgs = Organization.objects.filter(
+                manager=user,
+                is_active=True
+            ).values_list('id', flat=True)
+            user_teams = Team.objects.filter(
+                organization__in=manager_orgs,
+                is_active=True
+            ).values_list('id', flat=True)
+        else:
+            # Members can see members of teams they're part of
+            user_teams = TeamMembers.objects.filter(
+                member=user,
+                is_active=True
+            ).values_list('team', flat=True)
         
         return TeamMembers.objects.filter(
             team__in=user_teams,
@@ -354,5 +485,53 @@ class TeamMemberViewSet(viewsets.ReadOnlyModelViewSet):
         except Exception as e:
             return create_internal_error_response(
                 "Failed to retrieve team members. Please try again later.",
+                {"original_error": str(e)}
+            )
+    
+    @action(detail=False, methods=['get'])
+    def manager_team_members(self, request):
+        """Get team members for managers - separate endpoint for better reliability."""
+        try:
+            user = request.user
+            
+            # Only allow managers and admins
+            if user.role not in [UserRole.MANAGER, UserRole.ADMIN]:
+                return create_unauthorized_error_response(
+                    "Only managers and admins can access this endpoint.",
+                    {}
+                )
+            
+            # Get team members based on user role
+            if user.role == UserRole.ADMIN:
+                # Admins can see all team members
+                team_members = TeamMembers.objects.filter(
+                    is_active=True
+                ).select_related('member').order_by('member__name')
+            else:
+                # Managers can see members of teams from organizations they manage
+                manager_orgs = Organization.objects.filter(
+                    manager=user,
+                    is_active=True
+                ).values_list('id', flat=True)
+                user_teams = Team.objects.filter(
+                    organization__in=manager_orgs,
+                    is_active=True
+                ).values_list('id', flat=True)
+                
+                team_members = TeamMembers.objects.filter(
+                    team__in=user_teams,
+                    is_active=True
+                ).select_related('member').order_by('member__name')
+            
+            serializer = TeamMemberSerializer(team_members, many=True)
+            
+            return create_success_response(
+                "Manager team members retrieved successfully.",
+                {"members": serializer.data}
+            )
+            
+        except Exception as e:
+            return create_internal_error_response(
+                "Failed to retrieve manager team members. Please try again later.",
                 {"original_error": str(e)}
             )

@@ -31,6 +31,16 @@ const memberService = {
       } catch (error) {
         throw error;
       }
+    },
+
+    // Get team schedule for managers (separate endpoint for better reliability)
+    getManagerTeamSchedule: async () => {
+      try {
+        const response = await api.get('/member/schedule/manager_team_schedule/');
+        return response.data;
+      } catch (error) {
+        throw error;
+      }
     }
   },
 
@@ -46,25 +56,7 @@ const memberService = {
       }
     },
 
-    // Get swap requests sent by the current user
-    getSent: async () => {
-      try {
-        const response = await api.get('/member/swap-requests/sent/');
-        return response.data;
-      } catch (error) {
-        throw error;
-      }
-    },
-
-    // Get swap requests received by the current user
-    getReceived: async () => {
-      try {
-        const response = await api.get('/member/swap-requests/received/');
-        return response.data;
-      } catch (error) {
-        throw error;
-      }
-    },
+    // Removed unused endpoints: getSent, getReceived
 
     // Create a new swap request
     create: async (requesterSlotId, responderSlotId) => {
@@ -101,15 +93,7 @@ const memberService = {
       }
     },
 
-    // Get a specific swap request
-    getById: async (swapRequestId) => {
-      try {
-        const response = await api.get(`/member/swap-requests/${swapRequestId}/`);
-        return response.data;
-      } catch (error) {
-        throw error;
-      }
-    }
+    // Removed unused endpoint: getById
   },
 
   // Team member related endpoints
@@ -118,6 +102,16 @@ const memberService = {
     getAll: async () => {
       try {
         const response = await api.get('/member/team-members/');
+        return response.data;
+      } catch (error) {
+        throw error;
+      }
+    },
+
+    // Get team members for managers (separate endpoint for better reliability)
+    getManagerTeamMembers: async () => {
+      try {
+        const response = await api.get('/member/team-members/manager_team_members/');
         return response.data;
       } catch (error) {
         throw error;
