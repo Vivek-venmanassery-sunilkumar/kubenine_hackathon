@@ -90,6 +90,7 @@ LOCAL_APPS = [
     "hirethon_template.admin_dashboard",
     "hirethon_template.manager_dashboard",
     "hirethon_template.assign_task",
+    "hirethon_template.member_dashboard",
     # Your stuff: custom apps go here
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps

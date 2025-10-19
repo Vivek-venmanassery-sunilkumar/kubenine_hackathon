@@ -1,13 +1,70 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { logout } from '../store/authSlice';
 import authService from '../services/authService';
+import memberService from '../services/memberService';
+import { getErrorMessage } from '../utils/errorHandler';
 
 const MemberDashboard = () => {
   const { user, role, roles } = useSelector((state) => state.auth);
   const dispatch = useDispatch();
   const navigate = useNavigate();
+
+  // State for schedule data
+  const [schedule, setSchedule] = useState({});
+  const [mySlots, setMySlots] = useState([]);
+  const [teamSchedule, setTeamSchedule] = useState([]);
+  const [swapRequests, setSwapRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showSwapModal, setShowSwapModal] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [availableSlots, setAvailableSlots] = useState([]);
+
+  // Get next 7 days
+  const getNext7Days = () => {
+    const days = [];
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      days.push(date.toISOString().split('T')[0]);
+    }
+    return days;
+  };
+
+  const next7Days = getNext7Days();
+
+  // Load schedule data
+  const loadScheduleData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const [scheduleResponse, mySlotsResponse, teamScheduleResponse, swapRequestsResponse] = await Promise.all([
+        memberService.schedule.getMySchedule(),
+        memberService.schedule.getMySlots(),
+        memberService.schedule.getTeamSchedule(),
+        memberService.swapRequests.getAll()
+      ]);
+
+      setSchedule(scheduleResponse.data.schedule || {});
+      setMySlots(mySlotsResponse.data.slots || []);
+      setTeamSchedule(teamScheduleResponse.data.schedules || []);
+      setSwapRequests(swapRequestsResponse.data || []);
+    } catch (error) {
+      console.error('Error loading schedule data:', error);
+      setError(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadScheduleData();
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -19,6 +76,87 @@ const MemberDashboard = () => {
       dispatch(logout());
       navigate('/');
     }
+  };
+
+  // Handle slot click for swapping
+  const handleSlotClick = (slot) => {
+    if (slot.can_swap && slot.is_my_slot) {
+      setSelectedSlot(slot);
+      // Get available slots for swapping (other team members' slots)
+      const available = teamSchedule
+        .flatMap(schedule => schedule.timeslots || [])
+        .filter(ts => 
+          ts.assigned_member && 
+          ts.assigned_member !== user.id && 
+          !ts.is_break &&
+          new Date(ts.start_datetime) > new Date()
+        );
+      setAvailableSlots(available);
+      setShowSwapModal(true);
+    }
+  };
+
+  // Handle swap request creation
+  const handleCreateSwapRequest = async (responderSlotId) => {
+    try {
+      await memberService.swapRequests.create(selectedSlot.id, responderSlotId);
+      setShowSwapModal(false);
+      setSelectedSlot(null);
+      setAvailableSlots([]);
+      // Reload schedule data
+      await loadScheduleData();
+    } catch (error) {
+      console.error('Error creating swap request:', error);
+      setError(getErrorMessage(error));
+    }
+  };
+
+  // Handle swap request acceptance
+  const handleAcceptSwap = async (swapRequestId) => {
+    try {
+      await memberService.swapRequests.accept(swapRequestId);
+      // Reload schedule data
+      await loadScheduleData();
+    } catch (error) {
+      console.error('Error accepting swap request:', error);
+      setError(getErrorMessage(error));
+    }
+  };
+
+  // Handle swap request rejection
+  const handleRejectSwap = async (swapRequestId) => {
+    try {
+      await memberService.swapRequests.reject(swapRequestId);
+      // Reload schedule data
+      await loadScheduleData();
+    } catch (error) {
+      console.error('Error rejecting swap request:', error);
+      setError(getErrorMessage(error));
+    }
+  };
+
+  // Get slots for a specific date
+  const getSlotsForDate = (date) => {
+    return schedule[date] || [];
+  };
+
+  // Format time for display
+  const formatTime = (datetime) => {
+    return new Date(datetime).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
+  // Format date for display
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
   };
 
   return (
@@ -59,66 +197,206 @@ const MemberDashboard = () => {
           <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-8">
             <div className="text-center mb-8">
               <h2 className="text-3xl font-bold text-gray-900 mb-4">
-                OnCall Scheduler Member Panel
+                My Schedule - Next 7 Days
               </h2>
               <p className="text-lg text-gray-700 mb-2">
-                View your schedule and manage your on-call duties
+                View your upcoming shifts and manage swap requests
               </p>
               <p className="text-sm text-gray-600">
-                Stay organized and informed about your responsibilities
+                Click on your slots to request swaps with team members
               </p>
             </div>
-            
-            {/* Member Features */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-8 rounded-2xl shadow-lg border border-green-200 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">My Schedule</h3>
-                  <p className="text-gray-700 mb-6">View your upcoming shifts, duties, and on-call responsibilities</p>
-                  <button className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
-                    View Schedule
-                  </button>
+
+            {/* Error Display */}
+            {error && (
+              <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-red-800">{error}</p>
                 </div>
               </div>
-              
-              <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-8 rounded-2xl shadow-lg border border-amber-200 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-amber-500 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Shift Swaps</h3>
-                  <p className="text-gray-700 mb-6">Request, approve, or manage shift changes with your team</p>
-                  <button className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
-                    Manage Swaps
-                  </button>
-                </div>
+            )}
+
+            {/* Loading State */}
+            {loading && (
+              <div className="flex justify-center items-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500"></div>
               </div>
-              
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-2xl shadow-lg border border-blue-200 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5-5-5h5v-5a7.5 7.5 0 00-15 0v5h5l-5 5-5-5h5v-5a7.5 7.5 0 0115 0v5z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Notifications</h3>
-                  <p className="text-gray-700 mb-6">View alerts, updates, and important announcements</p>
-                  <button className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg">
-                    View Alerts
-                  </button>
+            )}
+
+            {/* Calendar View */}
+            {!loading && (
+              <div className="space-y-6">
+                {/* 7-Day Calendar Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
+                  {next7Days.map((date) => {
+                    const slots = getSlotsForDate(date);
+                    const isToday = date === new Date().toISOString().split('T')[0];
+                    
+                    return (
+                      <div
+                        key={date}
+                        className={`bg-white rounded-lg border-2 p-4 min-h-[200px] ${
+                          isToday ? 'border-amber-400 bg-amber-50' : 'border-gray-200'
+                        }`}
+                      >
+                        <div className="text-center mb-3">
+                          <h3 className="font-bold text-gray-900">{formatDate(date)}</h3>
+                          {isToday && (
+                            <span className="text-xs bg-amber-500 text-white px-2 py-1 rounded-full">
+                              Today
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="space-y-2">
+                          {slots.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-4">No slots</p>
+                          ) : (
+                            slots.map((slot) => (
+                              <div
+                                key={slot.id}
+                                onClick={() => handleSlotClick(slot)}
+                                className={`p-2 rounded-lg text-xs cursor-pointer transition-all duration-200 ${
+                                  slot.is_my_slot
+                                    ? slot.can_swap
+                                      ? 'bg-green-100 border border-green-300 hover:bg-green-200 hover:shadow-md'
+                                      : 'bg-green-200 border border-green-400'
+                                    : 'bg-gray-100 border border-gray-300'
+                                }`}
+                              >
+                                <div className="font-medium text-gray-900">
+                                  {formatTime(slot.start_datetime)} - {formatTime(slot.end_datetime)}
+                                </div>
+                                <div className="text-gray-600">
+                                  {slot.duration_hours}h
+                                </div>
+                                {slot.is_my_slot && (
+                                  <div className="text-green-700 font-medium">
+                                    {slot.can_swap ? 'Click to swap' : 'Your slot'}
+                                  </div>
+                                )}
+                                {!slot.is_my_slot && slot.assigned_member && (
+                                  <div className="text-gray-600">
+                                    {slot.assigned_member.name || slot.assigned_member.email}
+                                  </div>
+                                )}
+                                {slot.swap_status && (
+                                  <div className={`text-xs ${
+                                    slot.swap_status.status === 'pending' ? 'text-yellow-600' : 'text-blue-600'
+                                  }`}>
+                                    {slot.swap_status.status === 'pending' ? 'Swap pending' : 'Swap received'}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+
+                {/* Swap Requests Section */}
+                {swapRequests.length > 0 && (
+                  <div className="mt-8">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4">Swap Requests</h3>
+                    <div className="space-y-4">
+                      {swapRequests.map((request) => (
+                        <div
+                          key={request.id}
+                          className="bg-white border border-gray-200 rounded-lg p-4"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-medium text-gray-900">
+                                {request.requester_name} wants to swap with {request.responder_name}
+                              </p>
+                              <p className="text-sm text-gray-600">
+                                Status: <span className={`font-medium ${
+                                  request.status === 'pending' ? 'text-yellow-600' :
+                                  request.status === 'accepted' ? 'text-green-600' :
+                                  request.status === 'rejected' ? 'text-red-600' : 'text-gray-600'
+                                }`}>
+                                  {request.status}
+                                </span>
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Requested: {new Date(request.request_date).toLocaleString()}
+                              </p>
+                            </div>
+                            
+                            {request.status === 'pending' && request.responder === user.id && (
+                              <div className="flex space-x-2">
+                                <button
+                                  onClick={() => handleAcceptSwap(request.id)}
+                                  className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm"
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  onClick={() => handleRejectSwap(request.id)}
+                                  className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </div>
         </div>
       </main>
+
+      {/* Swap Modal */}
+      {showSwapModal && selectedSlot && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">
+              Request Swap for {formatTime(selectedSlot.start_datetime)} - {formatTime(selectedSlot.end_datetime)}
+            </h3>
+            
+            <div className="space-y-3 mb-6">
+              <p className="text-sm text-gray-600">Select a slot to swap with:</p>
+              {availableSlots.length === 0 ? (
+                <p className="text-gray-400 text-sm">No available slots for swapping</p>
+              ) : (
+                availableSlots.map((slot) => (
+                  <button
+                    key={slot.id}
+                    onClick={() => handleCreateSwapRequest(slot.id)}
+                    className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200"
+                  >
+                    <div className="font-medium text-gray-900">
+                      {formatTime(slot.start_datetime)} - {formatTime(slot.end_datetime)}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {slot.duration_hours}h with {slot.assigned_member.name || slot.assigned_member.email}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+            
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowSwapModal(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
