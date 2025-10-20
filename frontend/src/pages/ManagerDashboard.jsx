@@ -20,6 +20,7 @@ const ManagerDashboard = () => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [selectedTeam, setSelectedTeam] = useState('');
   const [loading, setLoading] = useState(false);
+  const [tabLoading, setTabLoading] = useState(false);
   const [teamConfigs, setTeamConfigs] = useState({});
   const [editingConfig, setEditingConfig] = useState(null);
   const [configForm, setConfigForm] = useState({
@@ -140,11 +141,66 @@ const ManagerDashboard = () => {
       await loadTeams();
       await loadInvitations();
       await loadTeamMembers();
-      await loadTeamConfigs();
-      await loadTeamScheduleStatus();
+      // Load configs and status after teams are loaded
+      if (teams.length > 0) {
+        await loadTeamConfigs();
+        await loadTeamScheduleStatus();
+      }
     };
     loadAllData();
   }, []);
+
+  // Load configs and status when teams change
+  useEffect(() => {
+    if (teams.length > 0) {
+      loadTeamConfigs();
+      loadTeamScheduleStatus();
+    }
+  }, [teams]);
+
+  // Load data when tab changes
+  useEffect(() => {
+    const loadTabData = async () => {
+      console.log(`Tab changed to: ${activeTab}`);
+      setTabLoading(true);
+      
+      try {
+        switch (activeTab) {
+          case 'teams':
+            // Teams data is already loaded on mount
+            console.log('Teams tab - data already loaded');
+            break;
+            
+          case 'invitations':
+            // Reload invitations when switching to invitations tab
+            console.log('Invitations tab - reloading invitations');
+            await loadInvitations();
+            break;
+            
+          case 'schedule':
+            // Reload schedule data when switching to schedule tab
+            console.log('Schedule tab - reloading schedule data');
+            if (teams.length > 0) {
+              await loadTeamConfigs();
+              await loadTeamScheduleStatus();
+            } else {
+              console.log('No teams available for schedule tab');
+            }
+            break;
+            
+          default:
+            console.log(`Unknown tab: ${activeTab}`);
+        }
+      } catch (error) {
+        console.error(`Error loading data for tab ${activeTab}:`, error);
+        toast.error(`Failed to load ${activeTab} data`);
+      } finally {
+        setTabLoading(false);
+      }
+    };
+    
+    loadTabData();
+  }, [activeTab]);
 
   const loadTeams = async () => {
     try {
@@ -188,15 +244,26 @@ const ManagerDashboard = () => {
 
   const loadTeamConfigs = async () => {
     try {
+      console.log('Loading team configs for teams:', teams);
       const configs = {};
       for (const team of teams) {
         try {
+          console.log(`Loading config for team ${team.id}: ${team.team_name}`);
           const response = await managerService.schedule.getTeamConfig(team.id);
+          console.log(`Config loaded for team ${team.id}:`, response.data);
           configs[team.id] = response.data;
         } catch (error) {
           console.error(`Error loading config for team ${team.id}:`, error);
+          // Set default config for teams that don't have one
+          configs[team.id] = {
+            timeslot_duration_hours: 4,
+            min_break_hours: 12,
+            team: team.id,
+            team_name: team.team_name
+          };
         }
       }
+      console.log('All team configs loaded:', configs);
       setTeamConfigs(configs);
     } catch (error) {
       console.error('Error loading team configs:', error);
@@ -205,15 +272,28 @@ const ManagerDashboard = () => {
 
   const loadTeamScheduleStatus = async () => {
     try {
+      console.log('Loading team schedule status for teams:', teams);
       const statuses = {};
       for (const team of teams) {
         try {
+          console.log(`Loading status for team ${team.id}: ${team.team_name}`);
           const response = await managerService.schedule.getTeamStatus(team.id);
+          console.log(`Status loaded for team ${team.id}:`, response.data);
           statuses[team.id] = response.data;
         } catch (error) {
           console.error(`Error loading schedule status for team ${team.id}:`, error);
+          // Set default status for teams that don't have one
+          statuses[team.id] = {
+            team_id: team.id,
+            team_name: team.team_name,
+            member_count: 0,
+            required_members: 5,
+            can_schedule: false,
+            has_schedules: false
+          };
         }
       }
+      console.log('All team statuses loaded:', statuses);
       setTeamScheduleStatus(statuses);
     } catch (error) {
       console.error('Error loading team schedule statuses:', error);
@@ -467,9 +547,18 @@ const ManagerDashboard = () => {
               </button>
             </div>
 
+            {/* Loading Indicator */}
+            {tabLoading && (
+              <div className="flex items-center justify-center py-8">
+                <div className="flex items-center space-x-3">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  <span className="text-gray-600">Loading {activeTab} data...</span>
+                </div>
+              </div>
+            )}
 
             {/* Tab Content */}
-            {activeTab === 'teams' && (
+            {!tabLoading && activeTab === 'teams' && (
               <div className="space-y-6">
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border border-blue-200">
                   <h3 className="text-xl font-bold text-gray-900 mb-4">Create New Team</h3>
@@ -701,7 +790,7 @@ const ManagerDashboard = () => {
               </div>
             )}
 
-            {activeTab === 'invitations' && (
+            {!tabLoading && activeTab === 'invitations' && (
               <div className="space-y-6">
                 <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-xl border border-green-200">
                   <h3 className="text-xl font-bold text-gray-900 mb-4">Invite New Member</h3>
@@ -801,7 +890,7 @@ const ManagerDashboard = () => {
               </div>
             )}
 
-            {activeTab === 'schedule' && (
+            {!tabLoading && activeTab === 'schedule' && (
               <div className="space-y-6">
                 {/* Team Selection */}
                 <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-xl border border-purple-200">

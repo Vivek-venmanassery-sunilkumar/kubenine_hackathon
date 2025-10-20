@@ -1,7 +1,7 @@
 from celery import shared_task
 from django.utils import timezone
 from datetime import datetime, timedelta
-from .models import TeamScheduleConfig, Schedule
+from .models import Schedule
 from hirethon_template.manager_dashboard.models import Team
 
 

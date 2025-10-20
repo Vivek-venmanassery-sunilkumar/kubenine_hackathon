@@ -185,6 +185,7 @@ class SwapRequestSerializer(serializers.ModelSerializer):
 class SwapRequestCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating swap requests."""
     
+    requester_slot = serializers.PrimaryKeyRelatedField(queryset=Timeslot.objects.all())
     responder_slot_id = serializers.IntegerField(write_only=True)
     
     class Meta:
@@ -278,6 +279,9 @@ class SwapRequestCreateSerializer(serializers.ModelSerializer):
         requester_slot = validated_data['requester_slot']
         first_slot_start = min(requester_slot.start_datetime, responder_slot.start_datetime)
         deadline = first_slot_start - timedelta(hours=24)
+        
+        # Remove requester_slot from validated_data since we're passing it explicitly
+        validated_data.pop('requester_slot', None)
         
         swap_request = SwapRequest.objects.create(
             requester=request.user,
